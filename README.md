@@ -23,8 +23,11 @@ CCU3 firmware and OpenCCU) and, later, the Go side for openccu-lite:
 - **the vendor step**: the kit and the built frame are copied into each addon at build time from
   one `kit.json` (plus the lighttpd proxy rule of an addon with its own server); nothing is shared
   between addons at runtime, so every addon carries its own pinned copy;
-- **`go/`**: the openccu-lite side (`addonkit`, `litesource`), started with the first addon that
-  needs it.
+- **`go/`**: the Go side of an addon with its own server: `addonkit` (session, CSRF, token,
+  manifest) and `litesource` (openccu-lite's APIs behind the `Source` interface), and for the
+  classic CCU `ccusource` (the interface processes over XML-RPC with an init callback, the names
+  from ReGaHSS - the same `Source`) and `addonkit/ccuauth` (the WebUI's sid confirmed through
+  rega.exe).
 
 Status: in development, no release yet.
 
