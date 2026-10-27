@@ -12,7 +12,10 @@ ADDON=kitdemo
 NAME="Kit Demo"
 CONF_DIR=/usr/local/etc/config
 ADDON_DIR=/usr/local/addons/$ADDON
-WWW_DIR=$CONF_DIR/addons/www/$ADDON
+# /addons/$WWW/: the settings frame and its CGIs; kit.json's "www", the id unless the addon's
+# own app is proxied at /addons/$ADDON/ (vendor checks that the two agree)
+WWW=$ADDON
+WWW_DIR=$CONF_DIR/addons/www/$WWW
 # in the addon's tree: the CCU3's install chroot has no /var/run, and on
 # openccu-lite a confined addon cannot write there
 PIDFILE=$ADDON_DIR/var/$ADDON.pid

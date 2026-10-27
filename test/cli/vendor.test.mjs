@@ -69,6 +69,55 @@ describe('vendor', () => {
         vendor({config, out, ...quiet});
         assert.equal(readFileSync(join(out, 'www/frame/index.html'), 'utf8'), '<!doctype html><title>built</title>');
     });
+
+    it('copies a frame built with kitVite (--frame), removes stale assets, --check covers it', () => {
+        const out = join(dir, 'f');
+        const web = join(dir, 'web-dist');
+        mkdirSync(join(web, 'assets'), {recursive: true});
+        writeFileSync(join(web, 'index.html'), '<!doctype html><script src="./frame/assets/a1.js"></script>');
+        writeFileSync(join(web, 'assets/a1.js'), 'one');
+        writeFileSync(join(web, 'frame-manifest.json'), JSON.stringify({tabs: ['hello']}));
+        vendor({config, out, frame: web, ...quiet});
+        assert.equal(readFileSync(join(out, 'www/frame/assets/a1.js'), 'utf8'), 'one');
+        assert.ok(existsSync(join(out, 'www/frame/addon.json')));
+        assert.match(readFileSync(join(out, 'lib/kit/MANIFEST'), 'utf8'), /  www\/frame\/assets\/a1\.js$/m);
+        rmSync(join(web, 'assets/a1.js'));
+        writeFileSync(join(web, 'assets/a2.js'), 'two');
+        assert.throws(() => vendor({config, out, frame: web, check: true, ...quiet}), /www\/frame\/assets\/a1\.js/);
+        vendor({config, out, frame: web, ...quiet});
+        assert.equal(existsSync(join(out, 'www/frame/assets/a1.js')), false);
+        vendor({config, out, frame: web, check: true, ...quiet});
+        assert.throws(() => vendor({config, out, frame: join(dir, 'nowhere'), ...quiet}), /no frame built with kitVite/);
+    });
+
+    it('a frame in its own www directory, the app proxied at /addons/<id>/', () => {
+        const cfg = join(dir, 'red.json');
+        writeFileSync(cfg, JSON.stringify({schema: 1, id: 'red', www: 'redmatic', name: {de: 'R', en: 'R'}, tabs: ['kit:service'],
+            proxied: {path: '/addons/red/', errorPage: true, port: 1880}, app: {path: '/addons/red/', label: {de: 'Node-RED', en: 'Node-RED'}}}));
+        const out = join(dir, 'r/red');
+        mkdirSync(out, {recursive: true});
+        writeFileSync(join(out, '../red.cfg'), '{CONFIG_URL /addons/red/settings.cgi ID red}');
+        assert.throws(() => vendor({config: cfg, out, ...quiet}), /CONFIG_URL \/addons\/red\/settings\.cgi, kit.json's www says \/addons\/redmatic\/settings\.cgi/);
+        writeFileSync(join(out, '../red.cfg'), '{CONFIG_URL /addons/redmatic/settings.cgi ID red}');
+        writeFileSync(join(out, 'rc.d'), 'ADDON=red\nWWW=$ADDON\n');
+        assert.throws(() => vendor({config: cfg, out, ...quiet}), /WWW=\$ADDON, kit.json's www is redmatic/);
+        writeFileSync(join(out, 'rc.d'), 'ADDON=red\nWWW=redmatic\n');
+        vendor({config: cfg, out, ...quiet});
+        const conf = readFileSync(join(out, 'etc/lighttpd.conf'), 'utf8');
+        assert.match(conf, /^\$HTTP\["url"\] == "\/addons\/red" \{\n    url\.redirect = \(\"\" => "\/addons\/red\/"\)\n\}$/m);
+        assert.match(conf, /^\$HTTP\["url"\] =~ "\^\/addons\/red\/" \{$/m);
+        assert.match(conf, /proxy\.server = \("\/addons\/red\/" => \(\("host" => "127\.0\.0\.1", "port" => 1880\)\)\)/);
+        assert.match(conf, /proxy\.header = \("upgrade" => "enable"\)/);
+        assert.match(conf, /server\.errorfile-prefix = "\/usr\/local\/addons\/red\/www\/lighttpd-error-"/);
+        assert.match(readFileSync(join(out, 'www/lighttpd-error-503.html'), 'utf8'), /"\/addons\/redmatic" \+ '\/kit\/alive\.cgi'/);
+        const json = JSON.parse(readFileSync(join(out, 'www/frame/addon.json'), 'utf8'));
+        assert.equal(json.www, 'redmatic');
+        assert.deepEqual(json.app, {path: '/addons/red/', label: {de: 'Node-RED', en: 'Node-RED'}});
+        assert.match(readFileSync(join(out, 'lib/kit/addon.tcl'), 'utf8'), /^set KIT\(www\) redmatic$/m);
+        // no port: no fragment, and a frame-hiding path is refused
+        writeFileSync(cfg, JSON.stringify({schema: 1, id: 'red', name: {de: 'R', en: 'R'}, tabs: ['kit:service'], proxied: {path: '/addons/red/'}}));
+        assert.throws(() => vendor({config: cfg, out: join(dir, 'r2'), ...quiet}), /would hide the frame/);
+    });
 });
 
 describe('the example and the scaffold', () => {

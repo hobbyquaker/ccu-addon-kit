@@ -12,7 +12,10 @@ ADDON=kitdemo
 ADDONS_DIR=/usr/local/addons
 ADDON_DIR=$ADDONS_DIR/$ADDON
 CONF_DIR=/usr/local/etc/config
-WWW_DIR=$CONF_DIR/addons/www/$ADDON
+# /addons/$WWW/: the settings frame and its CGIs; kit.json's "www", the id unless the addon's
+# own app is proxied at /addons/$ADDON/ (vendor checks that the two agree)
+WWW=$ADDON
+WWW_DIR=$CONF_DIR/addons/www/$WWW
 EXITCODE=10
 
 mount | grep /usr/local >/dev/null 2>&1 || mount /usr/local
@@ -44,6 +47,17 @@ rmdir $WWW_DIR 2>/dev/null
 ln -sfn $ADDON_DIR/www $WWW_DIR
 ln -sf $ADDON_DIR/rc.d $CONF_DIR/rc.d/$ADDON
 
+# the proxy rule of an addon with its own server (vendor writes etc/lighttpd.conf from kit.json's
+# "proxied"); lighttpd reads it on its next start
+LIGHTTPD_NEW=0
+if [ -f $ADDON_DIR/etc/lighttpd.conf ]; then
+    mkdir -p $CONF_DIR/lighttpd
+    [ -L $CONF_DIR/lighttpd/$ADDON.conf ] || LIGHTTPD_NEW=1
+    ln -sf $ADDON_DIR/etc/lighttpd.conf $CONF_DIR/lighttpd/$ADDON.conf
+else
+    rm -f $CONF_DIR/lighttpd/$ADDON.conf
+fi
+
 # the Einstellungen button
 touch $CONF_DIR/hm_addons.cfg
 $ADDON_DIR/bin/update_addon $ADDON ./$ADDON.cfg
@@ -55,6 +69,10 @@ sync
 if [ $EXITCODE -eq 0 ] && [ ! -f /etc/init.d/S00InstallAddon ]; then
     cd /
     $CONF_DIR/rc.d/$ADDON start
+fi
+# a new proxy rule on a running OpenCCU: lighttpd reads its fragments only when it starts
+if [ $LIGHTTPD_NEW -eq 1 ] && [ ! -f /etc/init.d/S00InstallAddon ] && [ -x /etc/init.d/S50lighttpd ]; then
+    /etc/init.d/S50lighttpd restart >/dev/null 2>&1
 fi
 
 exit $EXITCODE

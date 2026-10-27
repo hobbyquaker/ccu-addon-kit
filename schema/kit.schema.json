@@ -15,6 +15,7 @@
     "$schema": {"type": "string"},
     "schema": {"const": 1},
     "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "the /addons/<id>/ path and the rc.d name"},
+    "www": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "the directory of the settings frame and its CGIs: /addons/<www>/settings.cgi is the Config-Url; default the id, another name when the addon's own app is proxied at /addons/<id>/ (RedMatic: app /addons/red/, settings /addons/redmatic/)"},
     "name": {"$ref": "#/$defs/i18n"},
     "icon": {"type": "string", "description": "a path relative to the addon's www/"},
     "addonDir": {"$ref": "#/$defs/path", "description": "default /usr/local/addons/<id>"},
@@ -71,7 +72,19 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["path"],
-      "properties": {"path": {"type": "string", "pattern": "^/addons/"}, "errorPage": {"type": "boolean"}}
+      "properties": {
+        "path": {"type": "string", "pattern": "^/addons/.*/$", "description": "below /addons/<id>/, ending with /; must not hide the frame's /addons/<www>/"},
+        "errorPage": {"type": "boolean", "description": "install the 503 page shown while the server is down"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "the server's port on 127.0.0.1: vendor writes etc/lighttpd.conf (the proxy rule, the redirect of the path without its slash, the 503 page)"},
+        "websocket": {"type": "boolean", "description": "pass WebSocket upgrades (default true)"}
+      }
+    },
+    "app": {
+      "description": "The addon's own web application, served by its backend (e.g. behind a lighttpd proxy rule): the frame shows a prominent button that opens it in a new window, the session handed over as the WebUI hands it to the settings page",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "label"],
+      "properties": {"path": {"type": "string", "pattern": "^/addons/"}, "label": {"$ref": "#/$defs/i18n"}}
     },
     "links": {
       "type": "array",

@@ -11,8 +11,8 @@ export const LEVELS_PRESET = {read: 'user', service: 'admin', log: 'admin', writ
 
 const ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const TAB = /^[a-z0-9][a-z0-9-]*$/;
-const KEYS = ['$schema', 'schema', 'id', 'name', 'icon', 'addonDir', 'rc', 'versionFile', 'service', 'logs',
-    'update', 'permissions', 'tabs', 'proxied', 'links'];
+const KEYS = ['$schema', 'schema', 'id', 'www', 'name', 'icon', 'addonDir', 'rc', 'versionFile', 'service', 'logs',
+    'update', 'permissions', 'tabs', 'proxied', 'app', 'links'];
 
 function isObj(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 function isI18n(v) { return isObj(v) && typeof v.de === 'string' && typeof v.en === 'string' && v.de && v.en; }
@@ -33,6 +33,11 @@ export function normalizeKit(raw) {
     if (raw.schema !== 1) { e.push('"schema" must be 1'); }
     const id = raw.id;
     if (typeof id !== 'string' || !ID.test(id)) { e.push('"id" must match [a-z0-9][a-z0-9-]{0,31}'); }
+    // the www directory: /addons/<www>/ holds the frame and its CGIs; the id by default, another
+    // name when the addon's own app is proxied at /addons/<id>/ (RedMatic: /addons/red/ is
+    // Node-RED, /addons/redmatic/settings.cgi the configuration)
+    const www = raw.www ?? id;
+    if (typeof www !== 'string' || !ID.test(www)) { e.push('"www" must match [a-z0-9][a-z0-9-]{0,31}'); }
     if (!isI18n(raw.name)) { e.push('"name" must be {"de": "...", "en": "..."}'); }
     if (raw.icon !== undefined && (typeof raw.icon !== 'string' || !/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(raw.icon) || raw.icon.includes('..'))) {
         e.push('"icon" must be a relative path inside www/');
@@ -128,14 +133,35 @@ export function normalizeKit(raw) {
     }
 
     let proxied = null;
+    // the frame's own paths in /addons/<www>/ must stay reachable
+    const hidesFrame = (p) => [`/addons/${www}/`, `/addons/${www}/kit/`, `/addons/${www}/frame/`].some((f) => f.startsWith(p) || p.startsWith(f) && f !== `/addons/${www}/`);
     if (raw.proxied !== undefined) {
         if (!isObj(raw.proxied)) { e.push('"proxied" must be an object'); } else {
-            for (const k of Object.keys(raw.proxied)) { if (!['path', 'errorPage'].includes(k)) { e.push(`unknown key "proxied.${k}"`); } }
-            if (typeof raw.proxied.path !== 'string' || !raw.proxied.path.startsWith(`/addons/${id}/`)) {
-                e.push(`"proxied.path" must start with /addons/${id}/`);
+            for (const k of Object.keys(raw.proxied)) { if (!['path', 'errorPage', 'port', 'websocket'].includes(k)) { e.push(`unknown key "proxied.${k}"`); } }
+            const p = raw.proxied.path;
+            if (typeof p !== 'string' || !p.startsWith(`/addons/${id}/`) || !p.endsWith('/') || !/^[A-Za-z0-9/._-]+$/.test(p) || p.includes('..')) {
+                e.push(`"proxied.path" must start with /addons/${id}/ and end with /`);
+            } else if (hidesFrame(p)) {
+                e.push(`"proxied.path" ${p} would hide the frame in /addons/${www}/: proxy a sub-path, or give the frame its own "www"`);
             }
             if (raw.proxied.errorPage !== undefined && typeof raw.proxied.errorPage !== 'boolean') { e.push('"proxied.errorPage" must be true or false'); }
-            proxied = {path: raw.proxied.path, errorPage: raw.proxied.errorPage === true};
+            if (raw.proxied.port !== undefined && (!Number.isInteger(raw.proxied.port) || raw.proxied.port < 1 || raw.proxied.port > 65535)) {
+                e.push('"proxied.port" must be a port number');
+            }
+            if (raw.proxied.websocket !== undefined && typeof raw.proxied.websocket !== 'boolean') { e.push('"proxied.websocket" must be true or false'); }
+            proxied = {path: p, errorPage: raw.proxied.errorPage === true, port: raw.proxied.port ?? null, websocket: raw.proxied.websocket !== false};
+        }
+    }
+
+    let app = null;
+    if (raw.app !== undefined) {
+        if (!isObj(raw.app)) { e.push('"app" must be an object'); } else {
+            for (const k of Object.keys(raw.app)) { if (!['path', 'label'].includes(k)) { e.push(`unknown key "app.${k}"`); } }
+            if (typeof raw.app.path !== 'string' || !raw.app.path.startsWith('/addons/') || /[\s"'<>\\]|\.\./.test(raw.app.path)) {
+                e.push('"app.path" must start with /addons/');
+            }
+            if (!isI18n(raw.app.label)) { e.push('"app.label" must be {"de": "...", "en": "..."}'); }
+            app = {path: raw.app.path, label: raw.app.label};
         }
     }
 
@@ -147,8 +173,8 @@ export function normalizeKit(raw) {
     }
 
     if (e.length) { throw new KitConfigError(e); }
-    return {schema: 1, id, name: raw.name, icon: raw.icon ?? null, addonDir, rc, versionFile, service, logs, update,
-        permissions, tabs, proxied, links};
+    return {schema: 1, id, www, name: raw.name, icon: raw.icon ?? null, addonDir, rc, versionFile, service, logs, update,
+        permissions, tabs, proxied, app, links};
 }
 
 // --- Tcl ---------------------------------------------------------------------------------
@@ -194,6 +220,7 @@ export function addonTcl(kit, kitVersion) {
         `set KIT(github) ${tclWord(kit.update ? kit.update.github : '')}`,
         ...['read', 'service', 'log', 'write'].map((c) => `set KIT(perm,${c}) ${kit.permissions[c]}`),
         `set KIT(tabs) ${tclWord(tclList(kit.tabs))}`,
+        `set KIT(www) ${tclWord(kit.www)}`,
         `set KIT(proxiedPath) ${tclWord(kit.proxied ? kit.proxied.path : '')}`,
         '',
     ];
@@ -205,6 +232,7 @@ export function addonJson(kit, kitVersion) {
     return `${JSON.stringify({
         schema: 1,
         id: kit.id,
+        www: kit.www,
         name: kit.name,
         icon: kit.icon,
         kit: kitVersion,
@@ -214,6 +242,33 @@ export function addonJson(kit, kitVersion) {
         permissions: kit.permissions,
         tabs: kit.tabs,
         proxied: kit.proxied ? {path: kit.proxied.path} : null,
+        app: kit.app,
         links: kit.links,
     }, null, 2)}\n`;
+}
+
+// --- lighttpd ----------------------------------------------------------------------------
+
+function lighttpdRegex(s) { return s.replace(/[.^$|()[\]{}*+?\\]/g, '\\$&'); }
+
+// etc/lighttpd.conf for an addon with its own server (proxied.port): the proxy rule, the
+// redirect of the path without its slash, the 503 page while the server is down. Only what
+// openccu-lite's fragment check allows (the CCU addon handbook, chapter 11); the update_script
+// links it as /usr/local/etc/config/lighttpd/<id>.conf on a CCU.
+export function lighttpdConf(kit, kitVersion) {
+    const p = kit.proxied;
+    if (!p || !p.port) { return null; }
+    const bare = p.path.replace(/\/$/, '');
+    const lines = [
+        `# etc/lighttpd.conf - generated from kit.json by ccu-addon-kit ${kitVersion} (MIT); do not edit`,
+        `$HTTP["url"] == "${bare}" {`,
+        `    url.redirect = ("" => "${p.path}")`,
+        '}',
+        `$HTTP["url"] =~ "^${lighttpdRegex(p.path)}" {`,
+        `    proxy.server = ("${p.path}" => (("host" => "127.0.0.1", "port" => ${p.port})))`,
+    ];
+    if (p.websocket) { lines.push('    proxy.header = ("upgrade" => "enable")'); }
+    if (p.errorPage) { lines.push(`    server.errorfile-prefix = "${kit.addonDir}/www/lighttpd-error-"`); }
+    lines.push('}', '');
+    return lines.join('\n');
 }

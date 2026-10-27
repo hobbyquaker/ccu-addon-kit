@@ -15,13 +15,14 @@ build time.
 ├── bin/kit-run              the timeout runner (POSIX sh)
 ├── bin/update_addon         the hm_addons.cfg helper (the handbook's)
 ├── versions                 VERSION_ADDON=... (the addon's build writes it)
-└── www/                     = /addons/<id>/
+├── etc/lighttpd.conf        the proxy rule, with proxied.port (generated)
+└── www/                     = /addons/<www>/ (the id unless kit.json's www says otherwise)
     ├── settings.cgi         the Config-Url, generated
     ├── update_check.cgi     the Zusatzsoftware page's update check, generated
     ├── lighttpd-error-503.html   only with proxied.errorPage
     ├── kit/                 session.cgi service.cgi alive.cgi log.cgi version.cgi (generated stubs)
-    ├── frame/               the built frame (index.html, addon.json, assets) - until the frame
-    │                        exists, a placeholder page
+    ├── frame/               the built frame (index.html, assets/, addon.json), copied by
+    │                        vendor --frame; without one a placeholder page
     └── api/                 the addon's own tab CGIs
 ```
 
@@ -63,7 +64,8 @@ describes it for editors, `vendor` checks it.
 | Key | Required | Meaning |
 | --- | --- | --- |
 | `schema` | yes | `1` |
-| `id` | yes | `[a-z0-9][a-z0-9-]{0,31}`; the `/addons/<id>/` path and the rc.d name |
+| `id` | yes | `[a-z0-9][a-z0-9-]{0,31}`; the rc.d name, the addon's directory, `/addons/<id>/` |
+| `www` | no | the directory of the frame and its CGIs, `/addons/<www>/` (the `Config-Url` is `/addons/<www>/settings.cgi`); default the id. Another name when the addon's own application is proxied at `/addons/<id>/` (RedMatic: `red` and `redmatic`) |
 | `name` | yes | `{de, en}` |
 | `icon` | no | a path inside `www/` |
 | `addonDir`, `rc`, `versionFile` | no | default `/usr/local/addons/<id>`, `/usr/local/etc/config/rc.d/<id>`, `<addonDir>/versions` |
@@ -73,7 +75,8 @@ describes it for editors, `vendor` checks it.
 | `update.github` | no | `owner/repo` for the release check; without it only the version is shown |
 | `permissions` | no | who may do what, see [session.md](session.md#levels); default: any valid session may do everything |
 | `tabs` | yes | the order of the tabs; `kit:service`, `kit:log`, `kit:about` are the frame's; an addon tab id must be registered in the built frame |
-| `proxied` | no | an addon with its own HTTP server behind a lighttpd proxy rule; `errorPage` installs the 503 page |
+| `proxied` | no | an addon with its own HTTP server: `path` (below `/addons/<id>/`, ending with `/`, not hiding the frame's `/addons/<www>/`, `kit/` or `frame/`), `port` (127.0.0.1; `vendor` then writes `etc/lighttpd.conf`), `websocket` (default true), `errorPage` (installs the 503 page) |
+| `app` | no | `{path, label: {de, en}}`: the addon's own application, which the frame links with a button and the session handed over ([tab-contract.md](tab-contract.md#linking-the-addons-application)) |
 | `links` | no | `[{label: {de, en}, url}]` for the About tab |
 
 The **versions file** holds sh-sourceable `KEY=value` lines (optionally `export` and quoted).
@@ -83,6 +86,34 @@ The **versions file** holds sh-sourceable `KEY=value` lines (optionally `export`
 `vendor` generates `lib/kit/addon.tcl` (Tcl 8.2 has no JSON parser; every non-ASCII character is
 written as `\uXXXX` because a CCU3 sources files as iso8859-1) and `www/frame/addon.json` (public:
 no paths, no secrets).
+
+### An application at `/addons/<id>/`, the frame elsewhere
+
+```json
+{"id": "red", "www": "redmatic",
+ "proxied": {"path": "/addons/red/", "port": 1880, "errorPage": true},
+ "app": {"path": "/addons/red/", "label": {"de": "Node-RED öffnen", "en": "Open Node-RED"}}}
+```
+
+`vendor` writes `etc/lighttpd.conf` from `proxied`:
+
+```
+$HTTP["url"] == "/addons/red" {
+    url.redirect = ("" => "/addons/red/")
+}
+$HTTP["url"] =~ "^/addons/red/" {
+    proxy.server = ("/addons/red/" => (("host" => "127.0.0.1", "port" => 1880)))
+    proxy.header = ("upgrade" => "enable")
+    server.errorfile-prefix = "/usr/local/addons/red/www/lighttpd-error-"
+}
+```
+
+(only what openccu-lite's fragment check allows). The reference `update_script` links it as
+`/usr/local/etc/config/lighttpd/<id>.conf` and restarts lighttpd on a running OpenCCU when the
+link is new (the CCU3 firmware installs during the shutdown, so its boot reads it); the reference
+rc.d `uninstall` removes it. The addon's tree is linked as `/usr/local/etc/config/addons/www/<www>`
+(`WWW=` in both reference scripts), and `<id>.cfg`'s `CONFIG_URL` is `/addons/<www>/settings.cgi`:
+`vendor` refuses a tree whose `<id>.cfg` or `WWW=` disagrees with kit.json.
 
 ## Common rules
 
@@ -234,16 +265,18 @@ kit_main {
 
 1. **Pin** the kit in the addon's `package.json` as a devDependency with an exact tag
    (`"ccu-addon-kit": "github:hobbyquaker/ccu-addon-kit#v0.1.0"`).
-2. **Build** the frontend (once the frame exists) into `addon_files/<id>/www/frame/`.
-3. **Vendor:** `npx ccu-addon-kit vendor --config kit.json --out addon_files/<id>` copies the
-   library and `kit-run`, generates `addon.tcl`, `addon.json`, the CGI stubs and the 503 page,
-   writes `lib/kit/VERSION` (`<version> <commit>`) and `lib/kit/MANIFEST` (the hashes it wrote).
-   It checks kit.json and the tab ids against the built frame's `frame-manifest.json`, and
-   refuses to overwrite a library file somebody edited (its hash differs from `MANIFEST`) unless
-   `--force`.
+2. **Build** the settings page with Vite and `kitVite()` into `web/dist/`
+   ([tab-contract.md](tab-contract.md#building-a-page)).
+3. **Vendor:** `npx ccu-addon-kit vendor --config kit.json --out addon_files/<id> --frame web/dist`
+   copies the library and `kit-run`, the built frame into `www/frame/` (removing an earlier
+   build's leftovers), generates `addon.tcl`, `addon.json`, the CGI stubs, `etc/lighttpd.conf` and
+   the 503 page, writes `lib/kit/VERSION` (`<version> <commit>`) and `lib/kit/MANIFEST` (the hashes
+   it wrote). It checks kit.json, the tab ids against the frame's `frame-manifest.json` and the
+   `www` directory against `<id>.cfg` and the scripts' `WWW=`, and refuses to overwrite a library
+   file somebody edited (its hash differs from `MANIFEST`) unless `--force`.
 4. **Package** as before. The vendored files are build output, not committed (see
    [`example/kitdemo/.gitignore`](../example/kitdemo/.gitignore)), so a kit update is one line.
-5. **Drift check** in the addon's CI: `npx ccu-addon-kit vendor --check` fails when the tree
-   differs from what the pinned kit produces.
+5. **Drift check** in the addon's CI: `npx ccu-addon-kit vendor --check --frame web/dist` fails
+   when the tree differs from what the pinned kit produces.
 
 `ccu-addon-kit new <id> --name "<name>"` scaffolds an addon from [`example/kitdemo`](../example/kitdemo).

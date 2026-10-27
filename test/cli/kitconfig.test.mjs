@@ -29,13 +29,15 @@ describe('kit.json', () => {
         normalizeKit({...MIN, icon: 'icon.svg', logs: [{id: 'main', label: {de: 'Dienst', en: 'Service'}, file: '/var/log/battery.log', rotated: '/var/log/battery.log.0'},
             {id: 'syslog', syslogTag: 'battery'}], update: {github: 'hobbyquaker/ccu-addon-battery', assetHint: 'x-{version}.tgz'},
             permissions: {read: 'user', service: 'admin', log: 'admin', write: 'admin'},
-            tabs: ['overview', 'devices', 'kit:service', 'kit:log', 'kit:about'], proxied: {path: '/addons/battery/app/', errorPage: true}});
+            tabs: ['overview', 'devices', 'kit:service', 'kit:log', 'kit:about'], proxied: {path: '/addons/battery/app/', errorPage: true},
+            app: {path: '/addons/battery/app/', label: {de: 'Batterien öffnen', en: 'Open Batteries'}}});
     });
 
     it('lists every problem at once', () => {
         const bad = {schema: 2, id: 'Bad Id', name: {de: 'x'}, extra: 1, service: {commands: ['start', 'boot'], pollSeconds: 1},
             logs: [{id: 'a', file: 'relative.log'}, {id: 'a', syslogTag: 'x', file: '/x'}], permissions: {read: 'root', admin: 'any'},
-            tabs: ['kit:nope', 'kitchen', 'x', 'x'], proxied: {path: '/elsewhere/'}, update: {github: 'nope'}, addonDir: '/usr/../etc'};
+            tabs: ['kit:nope', 'kitchen', 'x', 'x'], proxied: {path: '/elsewhere/'}, update: {github: 'nope'}, addonDir: '/usr/../etc',
+            app: {path: 'http://elsewhere/', label: {de: 'x'}, target: '_self'}};
         try {
             normalizeKit(bad);
             assert.fail('no error');
@@ -43,7 +45,8 @@ describe('kit.json', () => {
             assert.ok(e instanceof KitConfigError);
             for (const part of ['unknown key "extra"', '"schema" must be 1', '"id" must match', '"name" must be', 'service.commands', 'pollSeconds',
                 'logs[0].file', 'logs[1].id "a" is used twice', 'exactly one of', '"permissions.read"', 'unknown key "permissions.admin"',
-                'tab "kit:nope"', 'tab "kitchen"', 'lists a tab twice', 'proxied.path', 'update.github', '"addonDir" must be an absolute path']) {
+                'tab "kit:nope"', 'tab "kitchen"', 'lists a tab twice', 'proxied.path', 'update.github', '"addonDir" must be an absolute path',
+                '"app.path" must start', '"app.label"', 'unknown key "app.target"']) {
                 assert.ok(e.errors.some((m) => m.includes(part)), `${part} in\n${e.errors.join('\n')}`);
             }
         }
@@ -67,14 +70,17 @@ describe('Tcl generation', () => {
         assert.deepEqual(json.logs, [{id: 'main', label: {de: 'main', en: 'main'}, kind: 'file'}]);
         assert.equal(JSON.stringify(json).includes('/var/log'), false);
         assert.equal(json.kit, '0.1.0');
+        assert.equal(json.app, null);
+        const withApp = JSON.parse(addonJson(normalizeKit({...MIN, app: {path: `/addons/${MIN.id}/app/`, label: {de: 'Öffnen', en: 'Open'}}}), '0.1.0'));
+        assert.deepEqual(withApp.app, {path: `/addons/${MIN.id}/app/`, label: {de: 'Öffnen', en: 'Open'}});
     });
 });
 
 describe('schema/kit.schema.json', () => {
     it('is valid JSON and names the same top-level keys', () => {
         const schema = JSON.parse(readFileSync(join(KIT_ROOT, 'schema/kit.schema.json'), 'utf8'));
-        assert.deepEqual(Object.keys(schema.properties).sort(), ['$schema', 'addonDir', 'icon', 'id', 'links', 'logs', 'name', 'permissions', 'proxied', 'rc',
-            'schema', 'service', 'tabs', 'update', 'versionFile']);
+        assert.deepEqual(Object.keys(schema.properties).sort(), ['$schema', 'addonDir', 'app', 'icon', 'id', 'links', 'logs', 'name', 'permissions', 'proxied', 'rc',
+            'schema', 'service', 'tabs', 'update', 'versionFile', 'www']);
         JSON.parse(readFileSync(join(KIT_ROOT, 'schema/service-status.schema.json'), 'utf8'));
     });
 });

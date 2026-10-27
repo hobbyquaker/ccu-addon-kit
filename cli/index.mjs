@@ -9,9 +9,10 @@ import {kitVersion} from './lib/kitroot.mjs';
 
 const USAGE = `usage: ccu-addon-kit <command> [options]
 
-  vendor   --config kit.json --out addon_files/<id> [--force] [--check]
+  vendor   --config kit.json --out addon_files/<id> [--frame web/dist] [--force] [--check]
            copy the kit's Tcl library, CGIs and kit-run into the addon's tree and generate
-           lib/kit/addon.tcl, www/frame/addon.json and the CGI stubs from kit.json
+           lib/kit/addon.tcl, www/frame/addon.json, the CGI stubs and etc/lighttpd.conf from
+           kit.json; --frame copies the frame built with kitVite() into www/frame/
   check-rc --rc <rc.d script> [--exec "<prefix>"] [--log <file>] [--legacy] [--no-reload] [--json]
            the conformance test of the service convention v1 against a running system
   new      <id> [--name "<name>"] [--dir <parent>]
@@ -21,10 +22,10 @@ const USAGE = `usage: ccu-addon-kit <command> [options]
 async function main(argv) {
     const [cmd, ...rest] = argv;
     if (cmd === 'vendor') {
-        const {values} = parseArgs({args: rest, options: {config: {type: 'string', default: 'kit.json'}, out: {type: 'string'},
+        const {values} = parseArgs({args: rest, options: {config: {type: 'string', default: 'kit.json'}, out: {type: 'string'}, frame: {type: 'string'},
             force: {type: 'boolean'}, check: {type: 'boolean'}}});
         if (!values.out) { throw new Error('vendor: --out is required'); }
-        vendor({config: values.config, out: values.out, force: values.force, check: values.check});
+        vendor({config: values.config, out: values.out, frame: values.frame, force: values.force, check: values.check});
         return 0;
     }
     if (cmd === 'check-rc') {
