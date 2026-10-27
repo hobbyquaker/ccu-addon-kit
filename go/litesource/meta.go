@@ -39,18 +39,50 @@ func (o MetaObject) pathsOf(prefix string) []string {
 	return out
 }
 
+// MetaText is a translated text of the metadata store: {"de": …, "en": …}, or one plain string
+// (the favorite enum's nodes carry the user's own page name), kept under "".
+type MetaText map[string]string
+
+// UnmarshalJSON accepts a string or a map.
+func (t *MetaText) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err == nil {
+		*t = MetaText{"": s}
+		return nil
+	}
+	var m map[string]string
+	if err := json.Unmarshal(b, &m); err != nil {
+		return err
+	}
+	*t = m
+	return nil
+}
+
+// In answers the text in lang, then en, then de, then any.
+func (t MetaText) In(lang string) string {
+	for _, l := range []string{lang, "en", "de", ""} {
+		if s := t[l]; s != "" {
+			return s
+		}
+	}
+	for _, s := range t {
+		return s
+	}
+	return ""
+}
+
 // MetaNode is a node of an enum tree.
 type MetaNode struct {
-	ID       string            `json:"id"`
-	Name     map[string]string `json:"name"`
-	Icon     string            `json:"icon,omitempty"`
-	Children []MetaNode        `json:"children,omitempty"`
+	ID       string     `json:"id"`
+	Name     MetaText   `json:"name"`
+	Icon     string     `json:"icon,omitempty"`
+	Children []MetaNode `json:"children,omitempty"`
 }
 
 // MetaEnum is one taxonomy with its tree.
 type MetaEnum struct {
-	Name map[string]string `json:"name"`
-	Tree []MetaNode        `json:"tree"`
+	Name MetaText   `json:"name"`
+	Tree []MetaNode `json:"tree"`
 }
 
 // MetaSnapshot is GET /api/meta/v1/snapshot: the whole document.
@@ -89,13 +121,7 @@ func (s *MetaSnapshot) NodeName(path, lang string) string {
 	if found == nil {
 		return rest
 	}
-	if n := found.Name[lang]; n != "" {
-		return n
-	}
-	if n := found.Name["en"]; n != "" {
-		return n
-	}
-	for _, n := range found.Name {
+	if n := found.Name.In(lang); n != "" {
 		return n
 	}
 	return found.ID

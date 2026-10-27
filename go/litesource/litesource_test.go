@@ -183,10 +183,14 @@ func TestMeta(t *testing.T) {
 	s := fakelite.New()
 	defer s.Close()
 	c := newClient(t, s)
-	s.Meta["enums"] = map[string]any{"room": map[string]any{"name": map[string]string{"en": "Rooms"}, "tree": []map[string]any{
-		{"id": "eg", "name": map[string]string{"de": "Erdgeschoss", "en": "Ground floor"}, "children": []map[string]any{
-			{"id": "kueche", "name": map[string]string{"de": "Küche", "en": "Kitchen"}}}}}}}
-	s.SetName("HmIP-RF.DEVA", "Fenster Küche", "room/eg/kueche")
+	s.Meta["enums"] = map[string]any{
+		"room": map[string]any{"name": map[string]string{"en": "Rooms"}, "tree": []map[string]any{
+			{"id": "eg", "name": map[string]string{"de": "Erdgeschoss", "en": "Ground floor"}, "children": []map[string]any{
+				{"id": "kueche", "name": map[string]string{"de": "Küche", "en": "Kitchen"}}}}}},
+		// the favorite enum's nodes carry a plain string as their name (a real system's snapshot)
+		"favorite": map[string]any{"name": "Favoriten", "tree": []map[string]any{{"id": "start", "name": "Startseite"}}},
+	}
+	s.SetName("HmIP-RF.DEVA", "Fenster Küche", "room/eg/kueche", "favorite/start")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	names, err := c.Names(ctx)
@@ -198,6 +202,10 @@ func TestMeta(t *testing.T) {
 	}
 	if r := names.RoomNames("HmIP-RF", "DEVA", "en"); r[0] != "Kitchen" {
 		t.Fatalf("rooms en: %v", r)
+	}
+	snap, _ := c.Meta().Snapshot(ctx)
+	if n := snap.NodeName("favorite/start", "de"); n != "Startseite" {
+		t.Fatalf("a string-named node: %q", n)
 	}
 	ch := c.NameEvents(ctx, names.Revision)
 	s.SetName("HmIP-RF.DEVA", "Küche Fenster")
