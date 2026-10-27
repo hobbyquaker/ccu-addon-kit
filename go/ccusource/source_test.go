@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -271,5 +272,80 @@ func TestInterfacesListAndURLs(t *testing.T) {
 	snap := ParseNames("junk\nD\tBidCos-RF\tJEQ01\tLampe\nC\tJEQ01:1\tLampe:1\t\n")
 	if snap.Objects["BidCos-RF.JEQ01"].Name != "Lampe" || len(snap.Objects["BidCos-RF.JEQ01"].Enums) != 0 {
 		t.Fatalf("%+v", snap.Objects)
+	}
+}
+
+// A filter naming interfaces registers with those processes only: VirtualDevices is running
+// but never sees an init, and a call that names it anyway is dropped.
+func TestSubscribeOnlyTheFilteredInterfaces(t *testing.T) {
+	ip := newDaemon(t)
+	virt := newDaemon(t)
+	dir := t.TempDir()
+	list := filepath.Join(dir, "InterfacesList.xml")
+	os.WriteFile(list, []byte(`<?xml version="1.0" encoding="utf-8" ?><interfaces v="1.0">
+<ipc><name>VirtualDevices</name><url>`+strings.Replace(virt.srv.URL, "http://", "xmlrpc://", 1)+`</url></ipc>
+<ipc><name>HmIP-RF</name><url>`+strings.Replace(ip.srv.URL, "http://", "xmlrpc://", 1)+`</url></ipc>
+<ipc><name>BidCos-RF</name><url>xmlrpc_bin://127.0.0.1:1</url></ipc>
+</interfaces>`), 0o644)
+	port := freePort(t)
+	s := New(Options{ID: "battery", CallbackPort: port, InterfacesList: list, SweepEvery: -1, ReinitEvery: time.Hour, NamesEvery: time.Hour, Log: t.Logf})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	ch := s.Subscribe(ctx, litesource.Filter{Interfaces: []string{"HmIP-RF", "BidCos-RF"}, Keys: []string{"OPERATING_VOLTAGE", "LOW_BAT"}}, "")
+	var got []string
+	deadline := time.After(5 * time.Second)
+	for len(got) < 3 {
+		select {
+		case m, ok := <-ch:
+			if !ok {
+				t.Fatal("closed")
+			}
+			switch m.Type {
+			case "hello":
+				got = append(got, "hello")
+				// a call naming the unwanted interface (as a stale registration would send)
+				ev, _ := MarshalCall("system.multicall", []any{
+					map[string]any{"methodName": "event", "params": []any{"battery-VirtualDevices", "INT0001:0", "LOW_BAT", true}},
+				})
+				virt.post("http://127.0.0.1:"+strconv.Itoa(port), ev)
+				nd, _ := MarshalCall("newDevices", "battery-VirtualDevices", []any{})
+				virt.post("http://127.0.0.1:"+strconv.Itoa(port), nd)
+			case "event":
+				got = append(got, m.Event.Interface+":"+m.Event.Address+"/"+m.Event.Key)
+			default:
+				if m.Devices != nil && m.Devices.Interface == "VirtualDevices" {
+					t.Fatalf("a device change of an unwanted interface came through: %+v", m)
+				}
+			}
+		case <-deadline:
+			t.Fatalf("got only %v", got)
+		}
+	}
+	select {
+	case m := <-ch:
+		if m.Event != nil && m.Event.Interface == "VirtualDevices" || m.Devices != nil && m.Devices.Interface == "VirtualDevices" {
+			t.Fatalf("an unwanted interface came through: %+v", m)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+	for _, g := range got {
+		if strings.HasPrefix(g, "VirtualDevices") {
+			t.Fatalf("an event of VirtualDevices came through: %v", got)
+		}
+	}
+	cancel()
+	for range ch {
+	}
+	virt.mu.Lock()
+	vinits := len(virt.inits)
+	virt.mu.Unlock()
+	ip.mu.Lock()
+	iinits := strings.Join(ip.inits, ",")
+	ip.mu.Unlock()
+	if vinits != 0 {
+		t.Fatalf("VirtualDevices got %d inits", vinits)
+	}
+	if !strings.HasPrefix(iinits, "battery-HmIP-RF") {
+		t.Fatalf("HmIP-RF inits: %s", iinits)
 	}
 }

@@ -55,6 +55,8 @@ type Source struct {
 	ifaces    []iface
 	descs     map[string][]litesource.DeviceDescription // by interface
 	lastNames string
+	// only are the interfaces the subscription wants (Filter.Interfaces); nil: all
+	only map[string]bool
 }
 
 type iface struct {
@@ -341,12 +343,22 @@ func (s *Source) Seed(ctx context.Context, f litesource.Filter) (*litesource.Sna
 
 // Subscribe starts the callback server on the loopback, registers with every interface process
 // (init) and delivers the events; a resync message follows a re-registration that found a
-// process restarted.
+// process restarted. A filter that names interfaces registers with those processes only - an
+// interface the addon does not want is never asked for its events (VirtualDevices answers an
+// init only after it pushed its whole device list) - and a call naming another one is dropped.
 func (s *Source) Subscribe(ctx context.Context, f litesource.Filter, since string) <-chan litesource.Message {
 	ch := make(chan litesource.Message, 256)
 	want := map[string]bool{}
 	for _, k := range f.Keys {
 		want[k] = true
+	}
+	if len(f.Interfaces) > 0 {
+		s.mu.Lock()
+		s.only = map[string]bool{}
+		for _, i := range f.Interfaces {
+			s.only[i] = true
+		}
+		s.mu.Unlock()
 	}
 	go func() {
 		defer close(ch)
@@ -400,6 +412,9 @@ func (s *Source) register(ctx context.Context, cbURL string) {
 		go func(idx int) {
 			defer wg.Done()
 			i := ifaces[idx]
+			if !s.wanted(i.Name) {
+				return
+			}
 			if !i.Running {
 				cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 				_, err := i.client.Call(cctx, "system.listMethods")
@@ -427,12 +442,19 @@ func (s *Source) register(ctx context.Context, cbURL string) {
 	wg.Wait()
 }
 
+// wanted says whether the subscription takes the interface's events.
+func (s *Source) wanted(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.only == nil || s.only[name]
+}
+
 func (s *Source) unregister(ctx context.Context, cbURL string) {
 	s.mu.Lock()
 	ifaces := s.ifaces
 	s.mu.Unlock()
 	for _, i := range ifaces {
-		if i.Running {
+		if i.Running && s.wanted(i.Name) {
 			_, _ = i.client.Call(ctx, "init", cbURL, "")
 		}
 	}
@@ -442,6 +464,9 @@ func (s *Source) unregister(ctx context.Context, cbURL string) {
 // delivers the values as state messages - a device that reports rarely still has a current
 // voltage.
 func (s *Source) sweep(ctx context.Context, ch chan<- litesource.Message, want map[string]bool) {
+	if !s.wanted("HmIP-RF") {
+		return
+	}
 	s.mu.Lock()
 	descs, known := s.descs["HmIP-RF"]
 	s.mu.Unlock()
@@ -520,7 +545,7 @@ func (s *Source) dispatch(method string, params []any, ch chan<- litesource.Mess
 			id, _ := params[0].(string)
 			addr, _ := params[1].(string)
 			key, _ := params[2].(string)
-			if len(want) == 0 || want[key] {
+			if (len(want) == 0 || want[key]) && s.wanted(s.ifaceOf(id)) {
 				select {
 				case ch <- litesource.Message{Type: "event", Event: &litesource.Event{Interface: s.ifaceOf(id), Address: addr, Key: key, Value: toJSON(params[3]), TS: time.Now(), Confirmed: true, Source: "event"}}:
 				default:
@@ -535,6 +560,9 @@ func (s *Source) dispatch(method string, params []any, ch chan<- litesource.Mess
 	case "newDevices", "deleteDevices", "updateDevice", "replaceDevice", "readdedDevice":
 		id, _ := first(params).(string)
 		name := s.ifaceOf(id)
+		if !s.wanted(name) {
+			return ""
+		}
 		s.logf("ccusource: %s: %s", name, method)
 		s.mu.Lock()
 		delete(s.descs, name)
