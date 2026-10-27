@@ -1,0 +1,6 @@
+{
+  "about": "the frame at /addons/<id>/ itself, the app on a sub-path of it, no 503 page",
+  "kit": {"schema": 1, "id": "demo", "name": {"de": "D", "en": "D"}, "tabs": ["kit:service"],
+          "proxied": {"path": "/addons/demo/app.v2/", "port": 8080, "websocket": false}},
+  "fragment": {"ID": "demo", "Path": "/addons/demo/app.v2/", "WWW": "demo", "Port": 8080}
+}

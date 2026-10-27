@@ -1,0 +1,7 @@
+{
+  "about": "the app proxied at /addons/<id>/, the settings page in its own www (ccu-addon-battery)",
+  "kit": {"schema": 1, "id": "battery", "www": "battery-config", "name": {"de": "Batterie", "en": "Battery"}, "tabs": ["kit:service"],
+          "proxied": {"path": "/addons/battery/", "port": 8291, "websocket": false, "errorPage": true}},
+  "fragment": {"ID": "battery", "Path": "/addons/battery/", "WWW": "battery-config", "Port": 8291,
+               "ErrorfilePrefix": "/usr/local/addons/battery/www/lighttpd-error-"}
+}

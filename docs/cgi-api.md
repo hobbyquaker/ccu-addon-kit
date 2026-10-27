@@ -109,7 +109,9 @@ $HTTP["url"] =~ "^/addons/red/" {
 }
 ```
 
-(only what openccu-lite's fragment check allows). The reference `update_script` links it as
+(only what openccu-lite's fragment check allows). A Go addon renders the same text with
+`go/addonkit/fragment` (`Fragment{ID, Path, WWW, Port, WebSocket, ErrorfilePrefix}`); both are
+checked against the fixtures in `go/addonkit/fragment/testdata`. The reference `update_script` links it as
 `/usr/local/etc/config/lighttpd/<id>.conf` and restarts lighttpd on a running OpenCCU when the
 link is new (the CCU3 firmware installs during the shutdown, so its boot reads it); the reference
 rc.d `uninstall` removes it. The addon's tree is linked as `/usr/local/etc/config/addons/www/<www>`

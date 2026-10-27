@@ -1,0 +1,7 @@
+{
+  "about": "RedMatic's pattern: Node-RED at /addons/red/ with websockets, the settings page under /addons/redmatic/",
+  "kit": {"schema": 1, "id": "red", "www": "redmatic", "name": {"de": "R", "en": "R"}, "tabs": ["kit:service"],
+          "proxied": {"path": "/addons/red/", "port": 1880, "errorPage": true}},
+  "fragment": {"ID": "red", "WWW": "redmatic", "Port": 1880, "WebSocket": true,
+               "ErrorfilePrefix": "/usr/local/addons/red/www/lighttpd-error-"}
+}

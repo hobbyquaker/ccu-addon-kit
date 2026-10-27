@@ -1,90 +1,126 @@
 // Package fragment renders the lighttpd fragment an addon with its own HTTP server ships as
 // etc/lighttpd.conf in its tree (handbook ch. 11, "Your own HTTP server"): the redirect of the
-// bare /addons/<id> to /addons/<id>/, and the proxy of /addons/<id>/… to the addon's loopback
-// port, with the CGIs the addon keeps for lighttpd excluded. Only directives occulited's
-// validator accepts are written.
+// bare path to its slash form, and the proxy of the path to the addon's loopback port or socket.
+//
+// It writes exactly what the kit CLI's `vendor` writes from kit.json's "proxied" (cli/lib/kitconfig.mjs,
+// lighttpdConf), and both are checked against the same fixtures (testdata/*.json and *.conf). The
+// shape is the one with the settings page in a www directory of its own (kit.json "www", RedMatic's
+// pattern): the app's path is proxied whole, nothing is carved out of it, and the kit's frame and CGIs
+// live under /addons/<www>/, which lighttpd serves itself. Only directives occulited's validator
+// accepts are written.
 package fragment
 
 import (
 	"fmt"
 	"regexp"
-	"sort"
 	"strings"
 )
 
 // Fragment describes one addon's rule.
 type Fragment struct {
-	// ID is the addon id; the rule covers /addons/<id>/.
+	// ID is the addon id.
 	ID string
-	// Port is the loopback port the daemon listens on (addonkit.Listen).
+	// Path is the proxied path: /addons/<id>/ or a directory below it, ending in "/"; empty is
+	// /addons/<id>/ (kit.json proxied.path).
+	Path string
+	// WWW is the addon's www directory, where the kit's frame and CGIs are (kit.json www); empty
+	// means the addon has none. When it is the id, a Path that would hide /addons/<id>/ itself, its
+	// kit/ or its frame/ is refused: give the frame a www of its own, or proxy a sub-path.
+	WWW string
+	// Port is the loopback port the daemon listens on (addonkit.Listen; kit.json proxied.port).
 	Port int
-	// Socket is a unix socket in the addon's tree instead of a port.
+	// Socket is a unix socket in the addon's tree instead of a port (the Go side only).
 	Socket string
-	// Exclude names files under /addons/<id>/ lighttpd keeps serving itself (settings.cgi,
-	// service.cgi); a negative lookahead leaves them out of the proxy.
-	Exclude []string
-	// WebSocket enables the upgrade header, which the CCU's lighttpd and openccu-lite's pass.
+	// WebSocket enables the upgrade header, which the CCU's lighttpd and openccu-lite's pass
+	// (kit.json proxied.websocket, true unless false there).
 	WebSocket bool
-	// ErrorfilePrefix is server.errorfile-prefix inside the addon's tree, for the 503 page
-	// while the daemon is not up; empty writes none.
+	// ErrorfilePrefix is server.errorfile-prefix inside the addon's tree, for the 503 page while the
+	// daemon is not up; empty writes none. kit.json's proxied.errorPage is
+	// <addonDir>/www/lighttpd-error-.
 	ErrorfilePrefix string
-	// Comment is written at the top, one # per line; empty writes the default.
-	Comment string
+	// KitVersion names the kit in the first line; empty is "go".
+	KitVersion string
 }
 
-var idShape = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+var (
+	idShape   = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
+	pathShape = regexp.MustCompile(`^[A-Za-z0-9/._-]+$`)
+)
+
+// inTree reports whether p is a plain path inside the addon's tree, safe inside a quoted string.
+func inTree(p, id string) bool {
+	return strings.HasPrefix(p, "/usr/local/addons/"+id+"/") && !strings.ContainsAny(p, "\"\\\n\r") && !strings.Contains(p, "..")
+}
 
 // Render writes the fragment.
 func Render(f Fragment) (string, error) {
 	if !idShape.MatchString(f.ID) {
 		return "", fmt.Errorf("fragment: id %q is not an addon id", f.ID)
 	}
+	base := "/addons/" + f.ID + "/"
+	path := f.Path
+	if path == "" {
+		path = base
+	}
+	if !strings.HasPrefix(path, base) || !strings.HasSuffix(path, "/") || !pathShape.MatchString(path) || strings.Contains(path, "..") {
+		return "", fmt.Errorf("fragment: path %q must start with %s and end with /", path, base)
+	}
+	if f.WWW != "" && !idShape.MatchString(f.WWW) {
+		return "", fmt.Errorf("fragment: www %q is not a directory name", f.WWW)
+	}
+	if hidesFrame(path, f.WWW) {
+		return "", fmt.Errorf("fragment: path %s would hide the frame in /addons/%s/: proxy a sub-path, or give the frame its own www", path, f.WWW)
+	}
 	if f.Socket == "" && (f.Port < 1 || f.Port > 65535) {
 		return "", fmt.Errorf("fragment: port %d out of range", f.Port)
 	}
-	if f.Socket != "" && !strings.HasPrefix(f.Socket, "/usr/local/addons/"+f.ID+"/") {
+	if f.Socket != "" && !inTree(f.Socket, f.ID) {
 		return "", fmt.Errorf("fragment: socket %q is not in the addon's tree", f.Socket)
 	}
-	for _, e := range f.Exclude {
-		if strings.ContainsAny(e, "/ \t\"") || e == "" {
-			return "", fmt.Errorf("fragment: exclude %q is not a file name", e)
-		}
-	}
-	if f.ErrorfilePrefix != "" && !strings.HasPrefix(f.ErrorfilePrefix, "/usr/local/addons/"+f.ID+"/") {
+	if f.ErrorfilePrefix != "" && !inTree(f.ErrorfilePrefix, f.ID) {
 		return "", fmt.Errorf("fragment: errorfile prefix %q is not in the addon's tree", f.ErrorfilePrefix)
 	}
-	var b strings.Builder
-	comment := f.Comment
-	if comment == "" {
-		comment = fmt.Sprintf("The lighttpd rule of the %s addon: /addons/%s/ is served by the addon's own server on the loopback.\n"+
-			"On openccu-lite the system makes its own validated copy of this file; on a CCU update_script copies it to\n"+
-			"/usr/local/etc/config/lighttpd/%s.conf.", f.ID, f.ID, f.ID)
+	version := f.KitVersion
+	if version == "" {
+		version = "go"
 	}
-	for _, line := range strings.Split(strings.TrimRight(comment, "\n"), "\n") {
-		b.WriteString("# " + line + "\n")
+	if strings.ContainsAny(version, "\n\r") {
+		return "", fmt.Errorf("fragment: kit version %q spans lines", version)
 	}
-	fmt.Fprintf(&b, "\n$HTTP[\"url\"] == \"/addons/%s\" {\n    url.redirect = (\"^/addons/%s$\" => \"/addons/%s/\")\n}\n\n", f.ID, f.ID, f.ID)
-	pattern := fmt.Sprintf("^/addons/%s/", f.ID)
-	if len(f.Exclude) > 0 {
-		ex := append([]string(nil), f.Exclude...)
-		sort.Strings(ex)
-		for i, e := range ex {
-			ex[i] = regexp.QuoteMeta(e)
-		}
-		pattern += "(?!" + strings.Join(ex, "|") + ")"
-	}
-	fmt.Fprintf(&b, "$HTTP[\"url\"] =~ \"%s\" {\n", pattern)
+	bare := strings.TrimSuffix(path, "/")
+	target := fmt.Sprintf(`("host" => "127.0.0.1", "port" => %d)`, f.Port)
 	if f.Socket != "" {
-		fmt.Fprintf(&b, "    proxy.server = (\"\" => ((\"socket\" => \"%s\")))\n", f.Socket)
-	} else {
-		fmt.Fprintf(&b, "    proxy.server = (\"\" => ((\"host\" => \"127.0.0.1\", \"port\" => %d)))\n", f.Port)
+		target = fmt.Sprintf(`("socket" => "%s")`, f.Socket)
+	}
+	lines := []string{
+		fmt.Sprintf("# etc/lighttpd.conf - generated by ccu-addon-kit %s (MIT); do not edit", version),
+		fmt.Sprintf(`$HTTP["url"] == "%s" {`, bare),
+		fmt.Sprintf(`    url.redirect = ("" => "%s")`, path),
+		"}",
+		fmt.Sprintf(`$HTTP["url"] =~ "^%s" {`, regexp.QuoteMeta(path)),
+		fmt.Sprintf(`    proxy.server = ("%s" => (%s))`, path, target),
 	}
 	if f.WebSocket {
-		b.WriteString("    proxy.header = (\"upgrade\" => \"enable\")\n")
+		lines = append(lines, `    proxy.header = ("upgrade" => "enable")`)
 	}
 	if f.ErrorfilePrefix != "" {
-		fmt.Fprintf(&b, "    server.errorfile-prefix = \"%s\"\n", f.ErrorfilePrefix)
+		lines = append(lines, fmt.Sprintf(`    server.errorfile-prefix = "%s"`, f.ErrorfilePrefix))
 	}
-	b.WriteString("}\n")
-	return b.String(), nil
+	lines = append(lines, "}", "")
+	return strings.Join(lines, "\n"), nil
+}
+
+// hidesFrame is the CLI's check: the proxied path must leave the frame's paths in /addons/<www>/
+// to lighttpd - the directory itself, its kit/ and its frame/.
+func hidesFrame(path, www string) bool {
+	if www == "" {
+		return false
+	}
+	dir := "/addons/" + www + "/"
+	for _, f := range []string{dir, dir + "kit/", dir + "frame/"} {
+		if strings.HasPrefix(f, path) || (strings.HasPrefix(path, f) && f != dir) {
+			return true
+		}
+	}
+	return false
 }
