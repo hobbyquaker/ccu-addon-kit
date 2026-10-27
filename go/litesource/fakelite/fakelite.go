@@ -49,6 +49,8 @@ type Server struct {
 	ring       []sseMsg
 	subs       map[chan sseMsg]struct{}
 	Calls      []string // every JSON-RPC method called, "<iface> <method> <params>"
+	// StreamQueries are the query strings of every event stream opened, oldest first.
+	StreamQueries []string
 	// Ping is the stream's heartbeat interval; 0 means none.
 	Ping time.Duration
 }
@@ -260,6 +262,13 @@ func (s *Server) Drop() {
 	s.mu.Unlock()
 }
 
+// Queries answers StreamQueries under the lock.
+func (s *Server) Queries() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.StreamQueries...)
+}
+
 // Streams counts the open event streams.
 func (s *Server) Streams() int {
 	s.mu.Lock()
@@ -274,6 +283,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	keys := splitQ(r.URL.Query()["key"], r.URL.Query()["datapoint"])
+	only := splitQ(r.URL.Query()["interface"])
 	last := r.Header.Get("Last-Event-ID")
 	if last == "" {
 		last = r.URL.Query().Get("last_event_id")
@@ -284,6 +294,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, ": connected\n\n")
 	ch := make(chan sseMsg, 1024)
 	s.mu.Lock()
+	s.StreamQueries = append(s.StreamQueries, r.URL.RawQuery)
 	var ifaces []map[string]any
 	for _, i := range s.Interfaces {
 		ifaces = append(ifaces, map[string]any{"name": i, "state": "up"})
@@ -317,6 +328,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Query().Get("devices") == "1" {
 		for iface, devs := range s.Devices {
+			if len(only) > 0 && !contains(only, iface) {
+				continue
+			}
 			b, _ := json.Marshal(map[string]any{"interface": iface, "devices": devs})
 			replay = append([]sseMsg{{event: "newDevices", data: string(b)}}, replay...)
 		}
@@ -332,6 +346,14 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 	}()
 	write := func(m sseMsg) bool {
+		if m.event != "hello" && m.event != "resync" && m.event != "ping" && len(only) > 0 {
+			// as occulited: a message that names an interface outside the filter is not sent
+			var d map[string]any
+			json.Unmarshal([]byte(m.data), &d)
+			if i := str(d["interface"]); i != "" && !contains(only, i) {
+				return true
+			}
+		}
 		if (m.event == "event" || m.event == "state") && len(keys) > 0 {
 			var d map[string]any
 			json.Unmarshal([]byte(m.data), &d)

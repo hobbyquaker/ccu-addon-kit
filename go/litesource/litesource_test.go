@@ -248,3 +248,26 @@ func TestDeviceDescriptionTolerantLists(t *testing.T) {
 		t.Error("a number is not a list")
 	}
 }
+
+// A filter naming interfaces goes to the stream as interface=, and (as occulited) nothing of
+// another interface comes back.
+func TestEventsInterfaceFilter(t *testing.T) {
+	s := fakelite.New()
+	defer s.Close()
+	s.Interfaces = []string{"HmIP-RF", "VirtualDevices"}
+	c := newClient(t, s)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ch := c.Events(ctx, litesource.Filter{Interfaces: []string{"HmIP-RF", "BidCos-RF"}, Keys: []string{"LOW_BAT"}}, "")
+	next(t, ch, "hello")
+	if q := s.Queries(); len(q) != 1 || !strings.Contains(q[0], "interface=HmIP-RF%2CBidCos-RF") {
+		t.Fatalf("stream query: %v", q)
+	}
+	s.PushEvent("VirtualDevices", "INT0001:0", "LOW_BAT", true)
+	s.PushEvent("HmIP-RF", "DEVA:0", "LOW_BAT", true)
+	m := next(t, ch, "event")
+	if m.Event.Interface != "HmIP-RF" {
+		t.Fatalf("an event of another interface came through: %+v", m.Event)
+	}
+	cancel()
+}
