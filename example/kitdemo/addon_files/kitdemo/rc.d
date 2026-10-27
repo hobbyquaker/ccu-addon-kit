@@ -138,11 +138,15 @@ case "$1" in
         ;;
     uninstall)
         Stop
-        $ADDON_DIR/bin/update_addon $ADDON
-        rm -f $CONF_DIR/rc.d/$ADDON $WWW_DIR
-        rm -f $CONF_DIR/lighttpd/$ADDON.conf
         rm -f $LOGFILE $LOGFILE.0 /tmp/kit-$ADDON-*
-        rm -rf $ADDON_DIR
+        # openccu-lite runs this as the addon's user and removes the button, the links, the
+        # proxy rule and the tree itself afterwards; the addon may not touch them there
+        if [ ! -x /usr/bin/occulited ]; then
+            $ADDON_DIR/bin/update_addon $ADDON
+            rm -f $CONF_DIR/rc.d/$ADDON $WWW_DIR
+            rm -f $CONF_DIR/lighttpd/$ADDON.conf
+            rm -rf $ADDON_DIR
+        fi
         log info "Uninstalled $ADDON"
         ;;
     *) exit 0 ;;
