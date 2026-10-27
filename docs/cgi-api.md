@@ -75,6 +75,7 @@ describes it for editors, `vendor` checks it.
 | `update.github` | no | `owner/repo` for the release check; without it only the version is shown |
 | `permissions` | no | who may do what, see [session.md](session.md#levels); default: any valid session may do everything |
 | `tabs` | yes | the order of the tabs; `kit:service`, `kit:log`, `kit:about` are the frame's; an addon tab id must be registered in the built frame |
+| `liteTabs` | no | the tabs shown **inside openccu-lite's shell**, a subset of `tabs` in order; default `tabs`. There the service and the log are the shell's own pages (the Addons page, the system log), so an addon may leave `kit:service` and `kit:log` out of this list |
 | `proxied` | no | an addon with its own HTTP server: `path` (below `/addons/<id>/`, ending with `/`, not hiding the frame's `/addons/<www>/`, `kit/` or `frame/`), `port` (127.0.0.1; `vendor` then writes `etc/lighttpd.conf`), `websocket` (default true), `errorPage` (installs the 503 page) |
 | `app` | no | `{path, label: {de, en}}`: the addon's own application, which the frame links with a button and the session handed over ([tab-contract.md](tab-contract.md#linking-the-addons-application)) |
 | `links` | no | `[{label: {de, en}, url}]` for the About tab |

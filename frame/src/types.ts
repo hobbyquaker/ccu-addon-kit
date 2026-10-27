@@ -56,6 +56,8 @@ export interface AddonConfig {
     readonly logs: readonly {readonly id: string; readonly label: I18nText; readonly kind: 'file' | 'syslog'}[];
     readonly update: {readonly github: string} | null;
     readonly tabs: readonly string[];
+    /** The tabs inside openccu-lite's shell (a subset of `tabs`); absent: `tabs`. */
+    readonly liteTabs?: readonly string[];
     readonly proxied: {readonly path: string} | null;
     /** The addon's own web application, served by its backend; the frame links it prominently. */
     readonly app?: {readonly path: string; readonly label: I18nText} | null;

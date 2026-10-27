@@ -155,6 +155,15 @@ describe('routes', () => {
         expect(visibleTabs(CONFIG, tabs.slice(1), 'admin')).toEqual(['admin-only', 'kit:service', 'kit:log', 'kit:about']);
     });
 
+    it('shows liteTabs inside openccu-lite, tabs elsewhere', () => {
+        const C = () => null as never;
+        const tabs: KitTab[] = [{id: 'hello', label: {de: 'a', en: 'a'}, component: C}];
+        const config = {...CONFIG, liteTabs: ['hello', 'kit:about']};
+        expect(visibleTabs(config, tabs, 'user', 'openccu-lite')).toEqual(['hello', 'kit:about']);
+        expect(visibleTabs(config, tabs, 'user', 'openccu')).toEqual(['hello', 'kit:service', 'kit:log', 'kit:about']);
+        expect(visibleTabs(CONFIG, tabs, 'user', 'openccu-lite')).toEqual(['hello', 'kit:service', 'kit:log', 'kit:about']);
+    });
+
     it('follows the hash; an unknown tab goes to the first', () => {
         history.replaceState(null, '', '/addons/kitdemo/settings.cgi#/nope');
         const kit = new KitState({config: CONFIG, sid: null, fetch: async () => json({})});

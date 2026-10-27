@@ -68,6 +68,13 @@
       "uniqueItems": true,
       "items": {"anyOf": [{"enum": ["kit:service", "kit:log", "kit:about"]}, {"type": "string", "pattern": "^(?!kit)[a-z0-9][a-z0-9-]*$"}]}
     },
+    "liteTabs": {
+      "description": "the tabs shown inside openccu-lite's shell (where service control and the log are the shell's own pages); a subset of tabs, in order; default: tabs",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string"}
+    },
     "proxied": {
       "type": "object",
       "additionalProperties": false,

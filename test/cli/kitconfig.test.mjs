@@ -33,6 +33,17 @@ describe('kit.json', () => {
             app: {path: '/addons/battery/app/', label: {de: 'Batterien öffnen', en: 'Open Batteries'}}});
     });
 
+    it('liteTabs is a subset of tabs and lands in addon.json', () => {
+        const kit = normalizeKit({...MIN, tabs: ['storage', 'kit:service', 'kit:log', 'kit:about'], liteTabs: ['storage', 'kit:about']});
+        assert.deepEqual(kit.liteTabs, ['storage', 'kit:about']);
+        assert.deepEqual(JSON.parse(addonJson(kit, '0.0.0')).liteTabs, ['storage', 'kit:about']);
+        assert.equal(normalizeKit(MIN).liteTabs, null);
+        assert.ok(!('liteTabs' in JSON.parse(addonJson(normalizeKit(MIN), '0.0.0'))));
+        for (const [liteTabs, part] of [[[], 'non-empty'], [['nope'], 'liteTabs entry "nope" is not in "tabs"'], [['kit:service', 'kit:service'], 'lists a tab twice']]) {
+            assert.throws(() => normalizeKit({...MIN, liteTabs}), (e) => e instanceof KitConfigError && e.errors.some((m) => m.includes(part)));
+        }
+    });
+
     it('lists every problem at once', () => {
         const bad = {schema: 2, id: 'Bad Id', name: {de: 'x'}, extra: 1, service: {commands: ['start', 'boot'], pollSeconds: 1},
             logs: [{id: 'a', file: 'relative.log'}, {id: 'a', syslogTag: 'x', file: '/x'}], permissions: {read: 'root', admin: 'any'},
@@ -79,8 +90,8 @@ describe('Tcl generation', () => {
 describe('schema/kit.schema.json', () => {
     it('is valid JSON and names the same top-level keys', () => {
         const schema = JSON.parse(readFileSync(join(KIT_ROOT, 'schema/kit.schema.json'), 'utf8'));
-        assert.deepEqual(Object.keys(schema.properties).sort(), ['$schema', 'addonDir', 'app', 'icon', 'id', 'links', 'logs', 'name', 'permissions', 'proxied', 'rc',
-            'schema', 'service', 'tabs', 'update', 'versionFile', 'www']);
+        assert.deepEqual(Object.keys(schema.properties).sort(), ['$schema', 'addonDir', 'app', 'icon', 'id', 'links', 'liteTabs',
+            'logs', 'name', 'permissions', 'proxied', 'rc', 'schema', 'service', 'tabs', 'update', 'versionFile', 'www'].sort());
         JSON.parse(readFileSync(join(KIT_ROOT, 'schema/service-status.schema.json'), 'utf8'));
     });
 });

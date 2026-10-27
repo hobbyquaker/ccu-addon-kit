@@ -29,7 +29,7 @@
     /** Tabs opened at least once: they stay mounted, so their input survives a switch. */
     let opened = $state<Record<string, boolean>>({});
 
-    const ids = $derived(phase === 'ready' ? visibleTabs(kit.config, tabs, kit.session.level) : []);
+    const ids = $derived(phase === 'ready' ? visibleTabs(kit.config, tabs, kit.session.level, kit.platform.kind) : []);
     const byId = $derived(new Map(tabs.map((tab) => [tab.id, tab])));
     const bar = $derived(
         ids.map((id) => {
@@ -57,7 +57,7 @@
         try {
             const valid = await kit.checkSession();
             phase = 'ready';
-            const list = visibleTabs(kit.config, tabs, kit.session.level);
+            const list = visibleTabs(kit.config, tabs, kit.session.level, kit.platform.kind);
             kit.setTabs(list);
             if (valid) {
                 kit.start(list);
@@ -65,7 +65,7 @@
         } catch (e) {
             if (isKitError(e) && e.code === 'session-invalid') {
                 phase = 'ready';
-                kit.setTabs(visibleTabs(kit.config, tabs, kit.session.level));
+                kit.setTabs(visibleTabs(kit.config, tabs, kit.session.level, kit.platform.kind));
                 return;
             }
             bootError = e;

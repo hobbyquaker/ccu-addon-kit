@@ -12,7 +12,7 @@ export const LEVELS_PRESET = {read: 'user', service: 'admin', log: 'admin', writ
 const ID = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const TAB = /^[a-z0-9][a-z0-9-]*$/;
 const KEYS = ['$schema', 'schema', 'id', 'www', 'name', 'icon', 'addonDir', 'rc', 'versionFile', 'service', 'logs',
-    'update', 'permissions', 'tabs', 'proxied', 'app', 'links'];
+    'update', 'permissions', 'tabs', 'liteTabs', 'proxied', 'app', 'links'];
 
 function isObj(v) { return v !== null && typeof v === 'object' && !Array.isArray(v); }
 function isI18n(v) { return isObj(v) && typeof v.de === 'string' && typeof v.en === 'string' && v.de && v.en; }
@@ -131,6 +131,18 @@ export function normalizeKit(raw) {
         }
         if (new Set(tabs).size !== tabs.length) { e.push('"tabs" lists a tab twice'); }
     }
+    // inside openccu-lite's shell the service and the log are the shell's own pages: an addon
+    // may show another (shorter) list there; every entry must be one of tabs
+    let liteTabs = null;
+    if (raw.liteTabs !== undefined) {
+        if (!Array.isArray(raw.liteTabs) || raw.liteTabs.length === 0) { e.push('"liteTabs" must be a non-empty list'); } else {
+            liteTabs = raw.liteTabs;
+            for (const t of liteTabs) {
+                if (!tabs.includes(t)) { e.push(`liteTabs entry "${t}" is not in "tabs"`); }
+            }
+            if (new Set(liteTabs).size !== liteTabs.length) { e.push('"liteTabs" lists a tab twice'); }
+        }
+    }
 
     let proxied = null;
     // the frame's own paths in /addons/<www>/ must stay reachable
@@ -174,7 +186,7 @@ export function normalizeKit(raw) {
 
     if (e.length) { throw new KitConfigError(e); }
     return {schema: 1, id, www, name: raw.name, icon: raw.icon ?? null, addonDir, rc, versionFile, service, logs, update,
-        permissions, tabs, proxied, app, links};
+        permissions, tabs, liteTabs, proxied, app, links};
 }
 
 // --- Tcl ---------------------------------------------------------------------------------
@@ -241,6 +253,7 @@ export function addonJson(kit, kitVersion) {
         update: kit.update ? {github: kit.update.github} : null,
         permissions: kit.permissions,
         tabs: kit.tabs,
+        ...(kit.liteTabs ? {liteTabs: kit.liteTabs} : {}),
         proxied: kit.proxied ? {path: kit.proxied.path} : null,
         app: kit.app,
         links: kit.links,

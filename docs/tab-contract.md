@@ -72,7 +72,9 @@ Dependencies of the addon: `ccu-addon-kit`, `occulite-ui` (^0.1), `svelte` (^5.4
 | `badge` | `() => number \| string \| null` (optional) | a reactive badge after the label |
 
 kit.json's `tabs` orders everything; the frame's own tabs are `kit:service`, `kit:log`,
-`kit:about` (routes `#/kit-service`, `#/kit-log`, `#/kit-about`). An unknown route opens the first
+`kit:about` (routes `#/kit-service`, `#/kit-log`, `#/kit-about`). Inside openccu-lite's shell the
+frame shows kit.json's `liteTabs` instead when the addon gives that list (a subset of `tabs`: there
+the shell has its own service and log pages). An unknown route opens the first
 tab. A tab is mounted when it is first opened and **stays mounted** while the user switches, so
 its unsaved input survives a switch and the session overlay.
 

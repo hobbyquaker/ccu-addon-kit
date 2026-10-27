@@ -545,11 +545,14 @@ export class KitState implements Kit {
 }
 
 /** Tab ids the frame shows, in kit.json's order: registered, allowed for the session's level. */
-export function visibleTabs(config: AddonConfig, registered: readonly KitTab[], level: Level): string[] {
+export function visibleTabs(config: AddonConfig, registered: readonly KitTab[], level: Level, platform: PlatformKind = 'openccu'): string[] {
     const byId = new Map(registered.map((t) => [t.id, t]));
     const rank = (l: Level) => (l === 'admin' ? 2 : l === 'user' || l === 'unknown' ? 1 : 0);
     const out: string[] = [];
-    for (const id of config.tabs) {
+    // inside openccu-lite the shell has its own service and log pages: kit.json's liteTabs
+    // (a subset of tabs) says what the frame shows there
+    const list = platform === 'openccu-lite' && config.liteTabs ? config.liteTabs : config.tabs;
+    for (const id of list) {
         if (id.startsWith('kit:')) {
             out.push(id);
             continue;
