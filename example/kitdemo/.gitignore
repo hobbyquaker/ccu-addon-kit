@@ -9,3 +9,4 @@ addon_files/kitdemo/www/settings.cgi
 addon_files/kitdemo/www/update_check.cgi
 addon_files/kitdemo/www/lighttpd-error-503.html
 addon_files/kitdemo/versions
+web/dist/

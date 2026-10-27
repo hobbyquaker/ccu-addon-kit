@@ -4,6 +4,7 @@
 #   vendor the kit, stamp the version, pack as root with LF endings and no ._ files.
 #
 #     VERSION=0.1.0 ./build.sh          KIT="npx ccu-addon-kit" by default
+#     FRAME=none ./build.sh             skip the web build: vendor installs the placeholder page
 #
 set -e
 cd "$(dirname "$0")"
@@ -11,8 +12,14 @@ ADDON=kitdemo
 VERSION=${VERSION:-0.0.0-dev}
 KIT=${KIT:-npx ccu-addon-kit}
 
-# the frame comes with occulite-ui; until then vendor installs the placeholder page
-$KIT vendor --config kit.json --out addon_files/$ADDON
+# the settings page: the kit's frame with the addon's tabs, built by Vite into web/dist and
+# copied into www/frame by vendor
+if [ "${FRAME:-}" = none ]; then
+    $KIT vendor --config kit.json --out addon_files/$ADDON
+else
+    npx vite build --logLevel warn --config web/vite.config.mjs
+    $KIT vendor --config kit.json --out addon_files/$ADDON --frame web/dist
+fi
 printf 'VERSION_ADDON=%s\n' "$VERSION" > addon_files/$ADDON/versions
 
 mkdir -p dist

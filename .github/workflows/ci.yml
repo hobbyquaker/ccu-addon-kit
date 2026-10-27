@@ -20,6 +20,30 @@ jobs:
       - run: node test/tcl/lint-tcl82.mjs
       - run: node --test 'test/cli/*.test.mjs'
 
+  frame:
+    name: frame (svelte-check, vitest, size, Playwright against the real CGIs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx svelte-check --tsconfig ./tsconfig.json --fail-on-warnings
+      - run: npx vitest run --config frame/vitest.config.ts
+      - run: npx vite build --config example/kitdemo/web/vite.config.mjs
+      - run: node test/frame/size.mjs
+      - run: docker build -f test/docker/tcl86.Dockerfile -t ccu-addon-kit-tcl86 test/
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --config test/frame/playwright.config.mjs
+      - uses: actions/upload-artifact@v5
+        if: failure()
+        with:
+          name: playwright-results
+          path: test/frame/test-results/
+          retention-days: 7
+
   sh:
     name: shellcheck, busybox, kit-run
     runs-on: ubuntu-latest
@@ -52,6 +76,8 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: 22
+          cache: npm
+      - run: npm ci
       - run: docker build -f test/e2e/Dockerfile -t ccu-addon-kit-e2e test/
       - run: node --test test/e2e/e2e.test.mjs
 

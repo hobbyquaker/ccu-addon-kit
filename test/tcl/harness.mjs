@@ -21,7 +21,7 @@ function sh(path, body) {
     chmodSync(path, 0o755);
 }
 
-export async function setup(kitOverrides = {}) {
+export async function setup(kitOverrides = {}, {frame} = {}) {
     const dir = mkdtempSync(join(tmpdir(), 'kit-test-'));
     const home = join(dir, 'addon');
     const fake = join(dir, 'fake');
@@ -43,7 +43,7 @@ export async function setup(kitOverrides = {}) {
         tabs: ['hello', 'kit:service', 'kit:log', 'kit:about'],
         ...kitOverrides,
     });
-    for (const [path, {data, mode}] of Object.entries(plan(kit, {out: home, version: '0.1.0-test', commit: 'abc'}))) {
+    for (const [path, {data, mode}] of Object.entries(plan(kit, {out: home, frame, version: '0.1.0-test', commit: 'abc'}))) {
         mkdirSync(join(home, path, '..'), {recursive: true});
         writeFileSync(join(home, path), data);
         chmodSync(join(home, path), mode);

@@ -92,6 +92,13 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
         assert.equal(page.headers['referrer-policy'], 'no-referrer');
         assert.match(page.body, /<title>Kit Demo<\/title>/);
         assert.match(http('/addons/kitdemo/frame/addon.json').body, /"id": "kitdemo"/);
+        // the built frame: its script below frame/, served by lighttpd
+        const script = /src="\.\/(frame\/assets\/[^"]+\.js)"/.exec(page.body);
+        assert.ok(script, 'the built frame, not the placeholder');
+        const js = http(`/addons/kitdemo/${script[1]}`);
+        assert.equal(js.status, 200);
+        assert.ok(js.body.length > 10000);
+        assert.equal(http('/addons/kitdemo/app/').status, 200);
 
         const none = http('/addons/kitdemo/kit/session.cgi');
         assert.deepEqual(none.json.session, {valid: false});

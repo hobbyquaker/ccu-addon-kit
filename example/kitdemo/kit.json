@@ -10,5 +10,7 @@
     {"id": "syslog", "label": {"de": "Systemprotokoll", "en": "System log"}, "syslogTag": "kitdemo"}
   ],
   "update": {"github": "hobbyquaker/ccu-addon-kit"},
-  "tabs": ["hello", "kit:service", "kit:log", "kit:about"]
+  "tabs": ["hello", "kit:service", "kit:log", "kit:about"],
+  "app": {"path": "/addons/kitdemo/app/", "label": {"de": "Anwendung öffnen", "en": "Open the application"}},
+  "links": [{"label": {"de": "ccu-addon-kit auf GitHub", "en": "ccu-addon-kit on GitHub"}, "url": "https://github.com/hobbyquaker/ccu-addon-kit"}]
 }

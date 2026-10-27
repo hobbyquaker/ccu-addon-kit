@@ -142,6 +142,11 @@ describe('the example and the scaffold', () => {
             const kit = JSON.parse(readFileSync(join(dir, 'battery/kit.json'), 'utf8'));
             assert.equal(kit.id, 'battery');
             assert.equal(r.written.some((p) => p.includes('/lib/kit/') || p.includes('/www/kit/')), false);
+            assert.ok(r.written.includes(join('battery', 'web/src/tabs/Hello.svelte')));
+            const pkg = JSON.parse(readFileSync(join(dir, 'battery/package.json'), 'utf8'));
+            assert.match(pkg.devDependencies['ccu-addon-kit'], /^github:hobbyquaker\/ccu-addon-kit#v\d/);
+            assert.ok(pkg.devDependencies['occulite-ui'] && pkg.devDependencies.vite);
+            assert.equal(r.written.some((p) => p.includes('web/dist')), false);
             assert.throws(() => scaffold({id: 'battery', dir}), /exists already/);
             assert.throws(() => scaffold({id: 'Bad', dir}), /must match/);
         } finally {

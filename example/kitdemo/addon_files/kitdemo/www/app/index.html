@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>Kit Demo</title>
+<style>
+:root { color-scheme: light dark; font: 14px/1.5 system-ui, sans-serif; }
+body { margin: 2rem; }
+code { font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<!-- kitdemo's stand-in for an addon's own application (ccu-addon-kit, MIT). A real addon serves
+     its app from its own server behind the proxy rule of kit.json's "proxied" (at /addons/<id>/,
+     with the settings frame in its own "www"); the frame's button opens it with the session
+     handed over as ?sid=@...@, as the WebUI hands it to the settings page. -->
+<h1>Kit Demo</h1>
+<p id="text"></p>
+<script>
+var de = /^de\b/i.test(navigator.language || '');
+var sid = new URLSearchParams(location.search).get('sid');
+document.getElementById('text').textContent = de
+    ? 'Hier wäre die Anwendung des Addons. ' + (sid ? 'Sitzung übergeben: ja.' : 'Ohne Sitzung in der Adresse (openccu-lite: das System prüft sie selbst).')
+    : 'The addon\'s application would be here. ' + (sid ? 'Session handed over: yes.' : 'No session in the address (openccu-lite: the system checks it itself).');
+document.getElementById('text').dataset.sid = sid ? 'yes' : 'no';
+</script>
+</body>
+</html>

@@ -15,11 +15,14 @@ CCU3 firmware and OpenCCU) and, later, the Go side for openccu-lite:
 - **the frame's CGIs**: session, service status and actions, a log tail with download and debug
   bundle, version and release check (cached, offline-tolerant), the WebUI's `update_check.cgi`,
   the 503 page for an addon with its own server, the `settings.cgi` entry point;
-- **a settings frame** in Svelte on `occulite-ui`, with an addon's own pages as tabs
-  ([docs/tab-contract.md](docs/tab-contract.md)) - not built yet; until then a placeholder page
-  serves the same CGIs;
-- **the vendor step**: the kit is copied into each addon at build time from one `kit.json`; nothing
-  is shared between addons at runtime, so every addon carries its own pinned copy;
+- **a settings frame** in Svelte 5 on [occulite-ui](https://github.com/hobbyquaker/occulite-ui):
+  the header with the service state, the Service, Log and About tabs, the addon's own tabs, a
+  button to the addon's own application, light and dark, German and English, inside the CCU's
+  WebUI and openccu-lite's shell ([docs/tab-contract.md](docs/tab-contract.md)); `kitVite()` for
+  the addon's Vite build;
+- **the vendor step**: the kit and the built frame are copied into each addon at build time from
+  one `kit.json` (plus the lighttpd proxy rule of an addon with its own server); nothing is shared
+  between addons at runtime, so every addon carries its own pinned copy;
 - **`go/`**: the openccu-lite side (`addonkit`, `litesource`), started with the first addon that
   needs it.
 
@@ -30,15 +33,18 @@ Status: in development, no release yet.
 ```sh
 npx ccu-addon-kit new myaddon --name "My Addon"      # scaffold from example/kitdemo
 cd myaddon
-# write kit.json, the daemon and the rc.d variables, then:
-npx ccu-addon-kit vendor --config kit.json --out addon_files/myaddon
-npx ccu-addon-kit vendor --config kit.json --out addon_files/myaddon --check   # in CI
+npm install
+# write kit.json, the daemon, the rc.d variables and the tabs in web/, then:
+npx vite build --config web/vite.config.mjs
+npx ccu-addon-kit vendor --config kit.json --out addon_files/myaddon --frame web/dist
+npx ccu-addon-kit vendor --config kit.json --out addon_files/myaddon --frame web/dist --check   # in CI
 npx ccu-addon-kit check-rc --exec "ssh root@<test-ccu>" --rc /usr/local/etc/config/rc.d/myaddon --log /var/log/myaddon.log
 ```
 
 [`example/kitdemo`](example/kitdemo) is a complete noarch addon: a small sh daemon, the reference
 rc.d script, the handbook's `update_script`, the `hm_addons.cfg` entry, an openccu-lite manifest,
-a tab CGI, and `build.sh` producing the `.tar.gz`.
+the settings page with one tab of its own (`web/`) and its CGI, and `build.sh` producing the
+`.tar.gz`.
 
 The CCU addon handbook, [ccu-addon-howto](https://github.com/homematic-community/ccu-addon-howto),
 explains the platform underneath: packaging, the installers, the rc.d script, the WebUI.
@@ -51,20 +57,26 @@ explains the platform underneath: packaging, the installers, the rc.d script, th
 | `classic/cgi/stub.cgi.in` | the template of the generated CGI stubs |
 | `classic/sh/` | `kit-run`, `rc.d-reference`, `rc-helpers.sh`, `update_script-reference`, `update_addon` |
 | `classic/html/` | the 503 page and the placeholder frame page |
+| `frame/` | the settings frame (Svelte 5, `ccu-addon-kit/frame`) and its unit tests |
+| `vite/` | `kitVite()` (`ccu-addon-kit/vite`) |
 | `cli/` | `vendor`, `check-rc`, `new` |
 | `schema/` | `kit.schema.json`, `service-status.schema.json` |
 | `example/kitdemo/` | the example addon |
-| `test/` | the CGI simulator with a stub `tclrega.so` and a stub `/state` (`test/tcl`), the Tcl 8.2 lint, the shell checks, the CLI tests, the end-to-end container (`test/e2e`) |
+| `test/` | the frame's Playwright tests against a stub server with the real CGIs (`test/frame`), the CGI simulator with a stub `tclrega.so` and a stub `/state` (`test/tcl`), the Tcl 8.2 lint, the shell checks, the CLI tests, the end-to-end container (`test/e2e`) |
 | `go/` | the openccu-lite side (later) |
 
 ## Tests
 
 ```sh
+npm ci                   # the frame's build and test dependencies
 npm test                 # the CLI tests (node only)
+npm run test:frame       # the frame's unit tests
+npm run typecheck        # svelte-check
 npm run lint:tcl         # the Tcl 8.2 lint
 sh test/gate.sh          # everything CI runs, in docker: shellcheck and busybox, the Tcl tests
                          # under Tcl 8.6 and under Tcl 8.2.3 built from source, the end-to-end
-                         # install of kitdemo with lighttpd and the conformance test
+                         # install of kitdemo with lighttpd and the conformance test, the
+                         # frame's checks, its size budget and its Playwright tests
 ```
 
 ## Licence
