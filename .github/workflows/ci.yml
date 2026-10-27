@@ -13,8 +13,8 @@ jobs:
     name: lint and CLI
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: node test/tcl/lint-tcl82.mjs
@@ -24,7 +24,7 @@ jobs:
     name: shellcheck, busybox, kit-run
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: docker build -f test/docker/tcl86.Dockerfile -t ccu-addon-kit-tcl86 test/
       - run: docker run --rm -v "$PWD:/kit" -w /kit ccu-addon-kit-tcl86 sh test/sh/run.sh
 
@@ -32,7 +32,7 @@ jobs:
     name: Tcl CGIs (Tcl 8.6)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: docker build -f test/docker/tcl86.Dockerfile -t ccu-addon-kit-tcl86 test/
       - run: docker run --rm -v "$PWD:/kit" -w /kit ccu-addon-kit-tcl86 node --test 'test/tcl/*.test.mjs'
 
@@ -40,7 +40,7 @@ jobs:
     name: Tcl CGIs (Tcl 8.2.3, the CCU3 firmware's)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: docker build -f test/docker/tcl82.Dockerfile -t ccu-addon-kit-tcl82 test/
       - run: docker run --rm -v "$PWD:/kit" -w /kit ccu-addon-kit-tcl82 node --test 'test/tcl/*.test.mjs'
 
@@ -48,8 +48,8 @@ jobs:
     name: kitdemo end to end (install, check-rc, CGIs through lighttpd)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: docker build -f test/e2e/Dockerfile -t ccu-addon-kit-e2e test/
