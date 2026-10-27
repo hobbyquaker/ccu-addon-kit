@@ -182,6 +182,11 @@ The `Config-Url`. It answers `www/frame/index.html` with `Cache-Control: no-stor
 checking the session: the page is static and holds no data, its first request
 (`kit/session.cgi`) decides, and every data request is checked.
 
+OpenCCU's lighttpd sets its own `Cache-Control: private, no-cache, ...` and
+`X-Frame-Options: SAMEORIGIN` on every answer, replacing the CGI's (seen on OpenCCU 3.89.8). Both
+are harmless here: the page is not cached either way, and the only frame it lives in,
+openccu-lite's shell, is same-origin.
+
 ## A tab's own CGIs
 
 Any name under `www/api/`, a stub like the kit's, on top of `lib/kit/cgi.tcl`:

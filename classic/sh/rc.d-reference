@@ -138,6 +138,7 @@ case "$1" in
         $ADDON_DIR/bin/update_addon $ADDON
         rm -f $CONF_DIR/rc.d/$ADDON $WWW_DIR
         rm -f $CONF_DIR/lighttpd/$ADDON.conf
+        rm -f $LOGFILE $LOGFILE.0 /tmp/kit-$ADDON-*
         rm -rf $ADDON_DIR
         log info "Uninstalled $ADDON"
         ;;

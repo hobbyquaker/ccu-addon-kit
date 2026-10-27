@@ -147,7 +147,7 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
     it('uninstalls without leftovers', () => {
         sh(`${RC} uninstall >/dev/null`);
         sh(`rm -f ${RC}`);
-        const left = sh(`for p in ${ADDON} ${RC} /usr/local/etc/config/addons/www/kitdemo; do [ -e "$p" ] || [ -L "$p" ] && echo "$p"; done; grep -c kitdemo /usr/local/etc/config/hm_addons.cfg; pidof kitdemo; true`, {ok: false}).out;
+        const left = sh(`for p in ${ADDON} ${RC} /usr/local/etc/config/addons/www/kitdemo /var/log/kitdemo.log /tmp/kit-kitdemo-release.json; do [ -e "$p" ] || [ -L "$p" ] && echo "$p"; done; grep -c kitdemo /usr/local/etc/config/hm_addons.cfg; pidof kitdemo; true`, {ok: false}).out;
         assert.equal(left.trim(), '0');
         assert.equal(sh('ps | grep -v grep | grep -c "bin/kitdemo"', {ok: false}).out.trim(), '0');
     });
