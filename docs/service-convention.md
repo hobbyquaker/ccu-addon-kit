@@ -95,7 +95,8 @@ npx ccu-addon-kit check-rc --exec "ssh root@<ccu>" --rc /usr/local/etc/config/rc
 ```
 
 It needs only `sh` on the system and runs every step through the command prefix. It stops and
-starts the service, so run it on a test system.
+starts the service, so run it on a test system. At the end it takes C12's line out of the log
+again and starts the service when it found it running.
 
 | # | Step | Passes when |
 | --- | --- | --- |

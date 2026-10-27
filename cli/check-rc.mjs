@@ -89,6 +89,10 @@ export async function checkRc({exec, rc, legacy = false, noReload = false, log =
         return r.stdout.split(/\s+/).filter(Boolean).map(Number);
     }
 
+    // the state the service was found in, restored at the end
+    const found = await status();
+    const wasRunning = Boolean(found.json && found.json.running === true);
+
     // C1
     await run(`${shq(rc)} stop >/dev/null 2>&1`, {timeoutMs: 90000});
     let s = await status();
@@ -201,6 +205,9 @@ export async function checkRc({exec, rc, legacy = false, noReload = false, log =
         if (s.error) { fail('C12', `status with an injected lastError: ${s.error}`); } else if (s.json && typeof s.json.lastError === 'string' && s.json.lastError.includes('injected')) {
             pass('C12', 'status with ", \\ and a tab in lastError: valid JSON');
         } else { warn('C12', 'status is valid JSON, but its lastError does not show the injected line'); }
+        // the service is stopped here (C7/C8): take the line out again, in place (same inode)
+        const tmp = `${log}.check-rc.tmp`;
+        await run(`grep -v -F -e ${shq(line)} ${shq(log)} > ${shq(tmp)}; cat ${shq(tmp)} > ${shq(log)}; rm -f ${shq(tmp)}`);
     } else {
         rec('C12', 'skip', 'no --log given');
     }
@@ -216,12 +223,20 @@ export async function checkRc({exec, rc, legacy = false, noReload = false, log =
         pass('C11', `${statusCalls.length} status calls, one line each, slowest ${Math.round(worst)} ms`);
     }
 
+    // leave the service as it was found: a box's running addon is started again
+    let restored = 'stopped';
+    if (wasRunning) {
+        const r = await run(`${shq(rc)} start >/dev/null 2>&1`, {timeoutMs: 90000});
+        restored = r.code === 0 ? 'started' : `start failed (exit ${r.code})`;
+    }
+
     results.sort((a, b) => Number(a.id.slice(1)) - Number(b.id.slice(1)));
-    return {ok: !results.some((x) => x.status === 'fail'), results, overheadMs: Math.round(overhead)};
+    return {ok: !results.some((x) => x.status === 'fail'), results, overheadMs: Math.round(overhead), restored};
 }
 
 export function printTable(report, out = console.log) {
     const mark = {pass: 'ok  ', fail: 'FAIL', warn: 'warn', skip: 'skip'};
     for (const r of report.results) { out(`${mark[r.status]}  ${r.id.padEnd(4)} ${r.text}`); }
+    if (report.restored && report.restored !== 'stopped') { out(`check-rc: the service was running before: ${report.restored} again`); }
     out(report.ok ? 'check-rc: conforms to the service convention v1' : 'check-rc: FAILED');
 }

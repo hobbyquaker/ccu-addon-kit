@@ -2,6 +2,7 @@
 // and a broken one. The reference script itself runs in the e2e container (test/e2e).
 import {after, before, describe, it} from 'node:test';
 import assert from 'node:assert/strict';
+import {execFileSync} from 'node:child_process';
 import {chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -39,7 +40,7 @@ describe('check-rc', {timeout: 120000}, () => {
     let dir;
     before(() => { dir = mkdtempSync(join(tmpdir(), 'kit-rc-')); });
     after(() => {
-        for (const n of ['legacy', 'modern', 'multi']) { try { process.kill(Number(readFileSync(join(dir, `${n}.pid`), 'utf8'))); } catch { /* gone */ } }
+        for (const n of ['legacy', 'modern', 'multi', 'restore', 'idle']) { try { process.kill(Number(readFileSync(join(dir, `${n}.pid`), 'utf8'))); } catch { /* gone */ } }
         rmSync(dir, {recursive: true, force: true});
     });
 
@@ -61,6 +62,21 @@ describe('check-rc', {timeout: 120000}, () => {
         assert.equal(r.results.find((x) => x.id === 'C12').status, 'skip');
         const nr = await checkRc({rc, statusRetryMs: 3000});
         assert.equal(nr.results.find((x) => x.id === 'C5').status, 'fail');
+    });
+
+    it('takes the injected log line out again and restarts a service it found running', async () => {
+        const rc = script(dir, 'restore', {legacy: false});
+        const log = join(dir, 'restore.log');
+        writeFileSync(log, 'line one\nline two\n');
+        execFileSync(rc, ['start']);
+        const r = await checkRc({rc, log, noReload: true, statusRetryMs: 3000});
+        assert.equal(r.ok, true, JSON.stringify(r.results));
+        assert.equal(r.results.find((x) => x.id === 'C12').status, 'warn');
+        assert.equal(readFileSync(log, 'utf8'), 'line one\nline two\n');
+        assert.equal(r.restored, 'started');
+        assert.equal(execFileSync(rc, ['status']).toString().includes('"running":true'), true);
+        const again = await checkRc({rc: script(dir, 'idle', {legacy: false}), noReload: true, statusRetryMs: 3000});
+        assert.equal(again.restored, 'stopped');
     });
 
     it('fails a status with more than one line', async () => {
