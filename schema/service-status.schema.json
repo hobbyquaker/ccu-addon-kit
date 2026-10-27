@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hobbyquaker/ccu-addon-kit/schema/service-status.schema.json",
+  "title": "rc.d status line, service convention v1",
+  "description": "The one JSON line an rc.d script prints for `status` (docs/service-convention.md). Exit code: 0 running, 3 not running, 1 not running although it should, 4 unknown.",
+  "type": "object",
+  "required": ["schema", "running"],
+  "properties": {
+    "schema": {"const": 1},
+    "running": {"type": "boolean"},
+    "state": {"enum": ["running", "stopped", "failed", "starting", "stopping"]},
+    "pid": {"type": "integer", "minimum": 1},
+    "rss_kb": {"type": "integer", "minimum": 0},
+    "pids": {"type": "array", "items": {"type": "integer", "minimum": 1}},
+    "since": {"type": ["integer", "null"]},
+    "version": {"type": "string"},
+    "cpu_pct": {"type": "number"},
+    "lastError": {"type": "string"},
+    "url": {"type": "string"},
+    "components": {"type": "object", "additionalProperties": {"type": "string"}}
+  },
+  "patternProperties": {"^x_": {}},
+  "if": {"properties": {"running": {"const": true}}},
+  "then": {"required": ["pid", "rss_kb"]}
+}
