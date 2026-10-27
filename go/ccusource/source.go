@@ -388,34 +388,43 @@ func (s *Source) Subscribe(ctx context.Context, f litesource.Filter, since strin
 	return ch
 }
 
-// register tells every running interface process the callback; a process that was down is
-// probed again first (it may have come up since), so a CCU whose radio process starts late
-// still delivers once it is there.
+// register tells every running interface process the callback, all at once - an init takes
+// its time (VirtualDevices answers after about ten seconds, it pushes its devices first) and
+// one must not hold the others up; a process that was down is probed again first (it may have
+// come up since), so a CCU whose radio process starts late still delivers once it is there.
 func (s *Source) register(ctx context.Context, cbURL string) {
 	ifaces := s.loadInterfaces(ctx)
+	var wg sync.WaitGroup
 	for idx := range ifaces {
-		i := &ifaces[idx]
-		if !i.Running {
-			cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-			_, err := i.client.Call(cctx, "system.listMethods")
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			i := ifaces[idx]
+			if !i.Running {
+				cctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+				_, err := i.client.Call(cctx, "system.listMethods")
+				cancel()
+				if err != nil {
+					return
+				}
+				s.mu.Lock()
+				if idx < len(s.ifaces) {
+					s.ifaces[idx].Running = true
+				}
+				s.mu.Unlock()
+			}
+			cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			start := time.Now()
+			_, err := i.client.Call(cctx, "init", cbURL, s.o.ID+"-"+i.Name)
 			cancel()
 			if err != nil {
-				continue
+				s.logf("ccusource: %s: init: %v", i.Name, err)
+			} else {
+				s.logf("ccusource: %s: registered for events (%.1f s)", i.Name, time.Since(start).Seconds())
 			}
-			i.Running = true
-			s.mu.Lock()
-			if idx < len(s.ifaces) {
-				s.ifaces[idx].Running = true
-			}
-			s.mu.Unlock()
-		}
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		_, err := i.client.Call(cctx, "init", cbURL, s.o.ID+"-"+i.Name)
-		cancel()
-		if err != nil {
-			s.logf("ccusource: %s: init: %v", i.Name, err)
-		}
+		}(idx)
 	}
+	wg.Wait()
 }
 
 func (s *Source) unregister(ctx context.Context, cbURL string) {
@@ -521,10 +530,12 @@ func (s *Source) dispatch(method string, params []any, ch chan<- litesource.Mess
 		}
 		return ""
 	case "listDevices":
+		s.logf("ccusource: %s asks for our device list (none kept)", s.ifaceOf(stringAt(params, 0)))
 		return []any{}
 	case "newDevices", "deleteDevices", "updateDevice", "replaceDevice", "readdedDevice":
 		id, _ := first(params).(string)
 		name := s.ifaceOf(id)
+		s.logf("ccusource: %s: %s", name, method)
 		s.mu.Lock()
 		delete(s.descs, name)
 		s.mu.Unlock()
@@ -547,6 +558,14 @@ func (s *Source) dispatch(method string, params []any, ch chan<- litesource.Mess
 		return []any{"system.multicall", "system.listMethods", "event", "listDevices", "newDevices", "deleteDevices", "updateDevice", "replaceDevice", "readdedDevice", "ping"}
 	case "ping":
 		return ""
+	}
+	return ""
+}
+
+func stringAt(p []any, i int) string {
+	if i < len(p) {
+		s, _ := p[i].(string)
+		return s
 	}
 	return ""
 }
