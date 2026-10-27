@@ -1,0 +1,2 @@
+# the CCU runs these with busybox sh and tclsh: LF only
+* text=auto eol=lf

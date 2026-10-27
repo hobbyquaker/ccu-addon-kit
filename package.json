@@ -1,0 +1,26 @@
+{
+  "name": "ccu-addon-kit",
+  "version": "0.1.0-dev",
+  "description": "The shared settings frame, Tcl CGI library and service convention for classic Homematic CCU addons (CCU3, OpenCCU), and the Go side for openccu-lite",
+  "license": "MIT",
+  "author": "Sebastian Raff <hobbyquaker@gmail.com>",
+  "repository": {"type": "git", "url": "git+https://github.com/hobbyquaker/ccu-addon-kit.git"},
+  "homepage": "https://github.com/hobbyquaker/ccu-addon-kit#readme",
+  "bugs": "https://github.com/hobbyquaker/ccu-addon-kit/issues",
+  "keywords": ["homematic", "ccu", "ccu3", "openccu", "addon", "tcl"],
+  "type": "module",
+  "engines": {"node": ">=20"},
+  "bin": {"ccu-addon-kit": "cli/index.mjs"},
+  "exports": {
+    "./schema/*": "./schema/*",
+    "./package.json": "./package.json"
+  },
+  "files": ["cli/", "classic/", "schema/", "docs/", "example/kitdemo/", "LICENSE", "README.md"],
+  "scripts": {
+    "test": "node --test test/cli/*.test.mjs",
+    "test:tcl": "node --test test/tcl/*.test.mjs",
+    "test:sh": "sh test/sh/kit-run.test.sh",
+    "lint:tcl": "node test/tcl/lint-tcl82.mjs",
+    "gate": "sh test/gate.sh"
+  }
+}
