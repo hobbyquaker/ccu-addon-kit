@@ -142,7 +142,7 @@ export function runCgi(script, {method = 'GET', query = '', headers = {}, body, 
         SCRIPT_FILENAME: script,
         REMOTE_ADDR: '192.0.2.10',
         HTTP_HOST: 'ccu.example:8080',
-        SERVER_PORT: '8080',
+        SERVER_PORT: env.SERVER_PORT ?? '8080',
     };
     if (body !== undefined) {
         cgiEnv.CONTENT_LENGTH = String(data.length);
@@ -152,6 +152,8 @@ export function runCgi(script, {method = 'GET', query = '', headers = {}, body, 
     }
     for (const [k, v] of Object.entries(headers)) {
         const name = k.toUpperCase().replace(/-/g, '_');
+        // null: the runner does not pass this header at all
+        if (v === null) { delete cgiEnv[`HTTP_${name}`]; continue; }
         if (name === 'CONTENT_TYPE') { cgiEnv.CONTENT_TYPE = v; } else { cgiEnv[`HTTP_${name}`] = v; }
     }
     return new Promise((resolve, reject) => {

@@ -233,6 +233,17 @@ describe('CSRF and methods', () => {
         assert.equal(t.read('rc-calls').includes('restart\nrestart\nrestart\nrestart'), false);
     });
 
+    it('without Host (openccu-lite\'s CGI runner): X-Forwarded-Host, else SERVER_NAME and its port', async () => {
+        const lite = (headers, env) => t.cgi('www/kit/service.cgi', {method: 'POST', query: {sid: SID.admin},
+            headers: {Host: null, 'X-CCU-Addon-Request': '1', ...headers}, env, body: {cmd: 'restart'}});
+        assert.equal((await lite({Origin: 'https://172.16.0.5'}, {SERVER_NAME: '172.16.0.5', SERVER_PORT: '443'})).status, 200);
+        assert.equal((await lite({Origin: 'http://ccu.local:8080'}, {SERVER_NAME: 'ccu.local', SERVER_PORT: '8080'})).status, 200);
+        assert.equal((await lite({Origin: 'http://ccu.local'}, {SERVER_NAME: 'ccu.local', SERVER_PORT: '8080'})).status, 403);
+        assert.equal((await lite({Origin: 'https://evil.example'}, {SERVER_NAME: '172.16.0.5', SERVER_PORT: '443'})).status, 403);
+        assert.equal((await lite({Origin: 'https://ccu.example', 'X-Forwarded-Host': 'ccu.example, proxy'}, {})).status, 200);
+        assert.equal((await lite({Origin: 'https://ccu.example'}, {})).json.error.message, 'request refused: origin');
+    });
+
     it('answers 405 to a write as GET and to other methods', async () => {
         const g = await t.cgi('www/kit/service.cgi', {query: {sid: SID.admin, cmd: 'stop'}});
         assert.equal(g.status, 405);

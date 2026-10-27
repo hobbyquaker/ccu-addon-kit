@@ -216,6 +216,30 @@ proc kit_level_ok {needed} {
     return 0
 }
 
+# the host the browser addressed: Host as lighttpd passes it; a CGI runner that leaves it out
+# (openccu-lite's occulited runs the CGIs behind lighttpd and passes SERVER_NAME/SERVER_PORT)
+# is matched by X-Forwarded-Host, else SERVER_NAME with its port (without it on 80 and 443)
+proc kit__request_hosts {} {
+    global env
+    if {[info exists env(HTTP_HOST)] && ![string equal $env(HTTP_HOST) ""]} {
+        return [list [string tolower $env(HTTP_HOST)]]
+    }
+    set hosts {}
+    if {[info exists env(HTTP_X_FORWARDED_HOST)]} {
+        lappend hosts [string tolower [string trim [lindex [split $env(HTTP_X_FORWARDED_HOST) ,] 0]]]
+    }
+    if {[info exists env(SERVER_NAME)] && ![string equal $env(SERVER_NAME) ""]} {
+        set name [string tolower $env(SERVER_NAME)]
+        set port ""
+        if {[info exists env(SERVER_PORT)]} { set port $env(SERVER_PORT) }
+        if {[string equal $port ""] || [string equal $port 80] || [string equal $port 443]} {
+            lappend hosts $name
+        }
+        if {![string equal $port ""]} { lappend hosts "$name:$port" }
+    }
+    return $hosts
+}
+
 proc kit_csrf_ok {} {
     global env
     if {![info exists env(REQUEST_METHOD)] || ![string equal [string toupper $env(REQUEST_METHOD)] POST]} {
@@ -225,12 +249,10 @@ proc kit_csrf_ok {} {
         return header
     }
     if {[info exists env(HTTP_ORIGIN)]} {
-        set host ""
-        if {[info exists env(HTTP_HOST)]} { set host [string tolower $env(HTTP_HOST)] }
         if {![regexp {^[a-zA-Z][a-zA-Z0-9+.-]*://([^/]+)$} $env(HTTP_ORIGIN) all ohost]} {
             return origin
         }
-        if {[string equal $host ""] || ![string equal [string tolower $ohost] $host]} {
+        if {[lsearch -exact [kit__request_hosts] [string tolower $ohost]] < 0} {
             return origin
         }
     }
