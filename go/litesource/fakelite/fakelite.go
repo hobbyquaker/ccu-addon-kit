@@ -294,20 +294,24 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 	var replay []sseMsg
 	var resync string
 	if last != "" {
-		boot, _, _ := strings.Cut(last, "-")
-		if boot != s.BootID {
+		// ids are <boot>-<seq>; a position is a seq, which need not be a message's own (GET
+		// /state's event_id is the stream's position, taken between messages), so the replay is
+		// everything with a higher seq, and a gap is a ring that does not reach back that far
+		boot, seqStr, _ := strings.Cut(last, "-")
+		lastSeq, perr := strconv.ParseInt(seqStr, 10, 64)
+		switch {
+		case boot != s.BootID:
 			resync = "boot"
-		} else {
-			found := false
-			for i, m := range s.ring {
-				if m.id == last {
-					replay = append([]sseMsg(nil), s.ring[i+1:]...)
-					found = true
-					break
-				}
-			}
-			if !found {
+		case perr != nil:
+			resync = "gap"
+		default:
+			if len(s.ring) > 0 && seqOf(s.ring[0].id) > lastSeq+1 {
 				resync = "gap"
+			}
+			for _, m := range s.ring {
+				if seqOf(m.id) > lastSeq {
+					replay = append(replay, m)
+				}
 			}
 		}
 	}
@@ -373,6 +377,12 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 			write(m)
 		}
 	}
+}
+
+func seqOf(id string) int64 {
+	_, seqStr, _ := strings.Cut(id, "-")
+	n, _ := strconv.ParseInt(seqStr, 10, 64)
+	return n
 }
 
 func (s *Server) paramsets(w http.ResponseWriter, r *http.Request) {
