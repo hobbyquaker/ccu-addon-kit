@@ -1,0 +1,20 @@
+{
+  "format": 1,
+  "id": "kitdemo",
+  "name": "Kit Demo",
+  "description": {
+    "de": "Das Beispiel-Addon von ccu-addon-kit: ein kleiner Dienst mit der gemeinsamen Einstellungsseite.",
+    "en": "The ccu-addon-kit example addon: a small service with the shared settings page."
+  },
+  "homepage": "https://github.com/hobbyquaker/ccu-addon-kit",
+  "licence": "MIT",
+  "ui": {
+    "icon": "kitdemo/www/icon.svg",
+    "session_header": true
+  },
+  "runtime": {
+    "daemon": true,
+    "needs": [],
+    "ports": []
+  }
+}

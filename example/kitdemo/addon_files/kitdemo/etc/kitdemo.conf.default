@@ -1,0 +1,3 @@
+# kitdemo's configuration, sourced by bin/kitdemo; kill -HUP (rc.d reload) re-reads it
+INTERVAL=10
+GREETING=hello

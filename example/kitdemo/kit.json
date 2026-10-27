@@ -1,0 +1,14 @@
+{
+  "$schema": "../../schema/kit.schema.json",
+  "schema": 1,
+  "id": "kitdemo",
+  "name": {"de": "Kit Demo", "en": "Kit Demo"},
+  "icon": "icon.svg",
+  "service": {"commands": ["start", "stop", "restart", "reload"], "pollSeconds": 10},
+  "logs": [
+    {"id": "main", "label": {"de": "Dienst", "en": "Service"}, "file": "/var/log/kitdemo.log", "rotated": "/var/log/kitdemo.log.0"},
+    {"id": "syslog", "label": {"de": "Systemprotokoll", "en": "System log"}, "syslogTag": "kitdemo"}
+  ],
+  "update": {"github": "hobbyquaker/ccu-addon-kit"},
+  "tabs": ["hello", "kit:service", "kit:log", "kit:about"]
+}

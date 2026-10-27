@@ -1,0 +1,11 @@
+# written by the build (vendor and the version stamp): never committed
+dist/
+addon_files/kitdemo/lib/kit/
+addon_files/kitdemo/bin/kit-run
+addon_files/kitdemo/bin/update_addon
+addon_files/kitdemo/www/kit/
+addon_files/kitdemo/www/frame/
+addon_files/kitdemo/www/settings.cgi
+addon_files/kitdemo/www/update_check.cgi
+addon_files/kitdemo/www/lighttpd-error-503.html
+addon_files/kitdemo/versions

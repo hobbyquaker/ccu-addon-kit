@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hobbyquaker/ccu-addon-kit/schema/kit.schema.json",
+  "title": "ccu-addon-kit kit.json",
+  "description": "An addon's kit configuration; ccu-addon-kit vendor generates lib/kit/addon.tcl and www/frame/addon.json from it (docs/cgi-api.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "tabs"],
+  "$defs": {
+    "i18n": {"type": "object", "required": ["de", "en"], "properties": {"de": {"type": "string", "minLength": 1}, "en": {"type": "string", "minLength": 1}}},
+    "path": {"type": "string", "pattern": "^/"},
+    "level": {"enum": ["any", "user", "admin"]}
+  },
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,31}$", "description": "the /addons/<id>/ path and the rc.d name"},
+    "name": {"$ref": "#/$defs/i18n"},
+    "icon": {"type": "string", "description": "a path relative to the addon's www/"},
+    "addonDir": {"$ref": "#/$defs/path", "description": "default /usr/local/addons/<id>"},
+    "rc": {"$ref": "#/$defs/path", "description": "default /usr/local/etc/config/rc.d/<id>"},
+    "versionFile": {"$ref": "#/$defs/path", "description": "default <addonDir>/versions"},
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "commands": {"type": "array", "uniqueItems": true, "items": {"enum": ["start", "stop", "restart", "reload"]}},
+        "pollSeconds": {"type": "integer", "minimum": 2, "maximum": 300}
+      }
+    },
+    "logs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "label": {"$ref": "#/$defs/i18n"},
+          "file": {"$ref": "#/$defs/path"},
+          "rotated": {"$ref": "#/$defs/path"},
+          "syslogTag": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,32}$"}
+        },
+        "oneOf": [{"required": ["file"]}, {"required": ["syslogTag"]}]
+      }
+    },
+    "update": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["github"],
+      "properties": {
+        "github": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
+        "assetHint": {"type": "string"}
+      }
+    },
+    "permissions": {
+      "description": "default: any valid session may do everything; \"levels\" is the opt-in table read: user, service/log/write: admin",
+      "oneOf": [
+        {"const": "levels"},
+        {"type": "object", "additionalProperties": false,
+          "properties": {"read": {"$ref": "#/$defs/level"}, "service": {"$ref": "#/$defs/level"}, "log": {"$ref": "#/$defs/level"}, "write": {"$ref": "#/$defs/level"}}}
+      ]
+    },
+    "tabs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"anyOf": [{"enum": ["kit:service", "kit:log", "kit:about"]}, {"type": "string", "pattern": "^(?!kit)[a-z0-9][a-z0-9-]*$"}]}
+    },
+    "proxied": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path"],
+      "properties": {"path": {"type": "string", "pattern": "^/addons/"}, "errorPage": {"type": "boolean"}}
+    },
+    "links": {
+      "type": "array",
+      "items": {"type": "object", "required": ["label", "url"], "properties": {"label": {"$ref": "#/$defs/i18n"}, "url": {"type": "string", "pattern": "^https?://"}}}
+    }
+  }
+}

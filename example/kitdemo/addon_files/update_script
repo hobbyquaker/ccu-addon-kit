@@ -1,0 +1,60 @@
+#!/bin/sh
+#
+#   update_script for a noarch addon built with ccu-addon-kit (MIT), the handbook's steps 1-12
+#   (chapter 02). The firmware unpacks the archive below /usr/local/tmp, cd's into it and runs
+#   ./update_script HM-RASPBERRYMATIC. Exit 10 = fresh install, 0 = update.
+#
+#   The addon's tree is <id>/ next to this script; its rc.d script is <id>/rc.d, its
+#   Einstellungen button <id>.cfg (the hm_addons.cfg dict), both at the top of the archive.
+#
+
+ADDON=kitdemo
+ADDONS_DIR=/usr/local/addons
+ADDON_DIR=$ADDONS_DIR/$ADDON
+CONF_DIR=/usr/local/etc/config
+WWW_DIR=$CONF_DIR/addons/www/$ADDON
+EXITCODE=10
+
+mount | grep /usr/local >/dev/null 2>&1 || mount /usr/local
+
+mkdir -p $ADDONS_DIR && chmod 755 $ADDONS_DIR
+mkdir -p $CONF_DIR/addons/www && chmod 755 $CONF_DIR/addons/www
+mkdir -p $CONF_DIR/rc.d
+
+# an update: stop the running service through the previous version's script
+if [ -f $CONF_DIR/rc.d/$ADDON ]; then
+    EXITCODE=0
+    $CONF_DIR/rc.d/$ADDON stop
+fi
+
+# everything but etc/ and var/ is the addon's: nothing stale may survive an update
+rm -rf "${ADDON_DIR:?}/bin" "${ADDON_DIR:?}/lib" "${ADDON_DIR:?}/www" "${ADDON_DIR:?}/rc.d" "${ADDON_DIR:?}/versions"
+
+cp -af $ADDON $ADDONS_DIR/
+mkdir -p $ADDON_DIR/var $ADDON_DIR/etc
+
+# default configuration on the first install only: afterwards the files are the user's
+for f in $ADDON_DIR/etc/*.default; do
+    [ -f "$f" ] || continue
+    [ -f "${f%.default}" ] || cp "$f" "${f%.default}"
+done
+
+# links: -n because busybox ln -T refuses to replace an existing directory symlink
+rmdir $WWW_DIR 2>/dev/null
+ln -sfn $ADDON_DIR/www $WWW_DIR
+ln -sf $ADDON_DIR/rc.d $CONF_DIR/rc.d/$ADDON
+
+# the Einstellungen button
+touch $CONF_DIR/hm_addons.cfg
+$ADDON_DIR/bin/update_addon $ADDON ./$ADDON.cfg
+
+sync
+
+# OpenCCU runs this live and does not reboot after an update: start the service again. The
+# CCU3 firmware runs it in a chroot during the shutdown (S00InstallAddon); the boot starts it.
+if [ $EXITCODE -eq 0 ] && [ ! -f /etc/init.d/S00InstallAddon ]; then
+    cd /
+    $CONF_DIR/rc.d/$ADDON start
+fi
+
+exit $EXITCODE

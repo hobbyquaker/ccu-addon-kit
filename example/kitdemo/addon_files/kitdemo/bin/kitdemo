@@ -1,0 +1,38 @@
+#!/bin/sh
+#
+#   kitdemo - the ccu-addon-kit example daemon (MIT). Logs a heartbeat every few seconds and
+#   re-reads its configuration on SIGHUP. Started by the rc.d script with -c <config>.
+#
+
+conf=/usr/local/addons/kitdemo/etc/kitdemo.conf
+[ "$1" = "-c" ] && conf=$2
+INTERVAL=10
+GREETING=hello
+
+load() {
+    INTERVAL=10
+    GREETING=hello
+    # shellcheck disable=SC1090
+    [ -r "$conf" ] && . "$conf"
+    case "$INTERVAL" in ''|*[!0-9]*) INTERVAL=10 ;; esac
+}
+
+sleeper=
+trap 'reload=1; [ -n "$sleeper" ] && kill "$sleeper" 2>/dev/null' HUP
+trap '[ -n "$sleeper" ] && kill "$sleeper" 2>/dev/null; echo "$(date "+%Y-%m-%d %H:%M:%S") kitdemo: stopped"; exit 0' TERM INT
+
+load
+echo "$(date "+%Y-%m-%d %H:%M:%S") kitdemo: started (pid $$, interval $INTERVAL s)"
+reload=0
+while :; do
+    if [ "$reload" = 1 ]; then
+        reload=0
+        load
+        echo "$(date "+%Y-%m-%d %H:%M:%S") kitdemo: configuration reloaded (interval $INTERVAL s)"
+    fi
+    echo "$(date "+%Y-%m-%d %H:%M:%S") kitdemo: heartbeat, $GREETING"
+    sleep "$INTERVAL" &
+    sleeper=$!
+    wait "$sleeper"
+    sleeper=
+done
