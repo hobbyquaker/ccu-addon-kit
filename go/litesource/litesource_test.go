@@ -2,6 +2,7 @@ package litesource_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -216,5 +217,34 @@ func TestMeta(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("no meta event")
+	}
+}
+
+// The VirtualDevices process answers CHILDREN as a string ("" without children) where rfd and
+// hmipserver send an array; seen on a production system 2026-10-27, where the whole interface
+// was skipped for it.
+func TestDeviceDescriptionTolerantLists(t *testing.T) {
+	cases := []struct {
+		in       string
+		children []string
+		sets     []string
+		version  int
+	}{
+		{`{"ADDRESS":"CUX2801001","TYPE":"HM-LC-Sw1-Pl","CHILDREN":"","PARAMSETS":"MASTER","VERSION":"7"}`, []string{}, []string{"MASTER"}, 7},
+		{`{"ADDRESS":"CUX2801001:1","TYPE":"SWITCH","PARENT":"CUX2801001","CHILDREN":"CUX2801001:2","PARAMSETS":["MASTER","VALUES"],"VERSION":1.0}`, []string{"CUX2801001:2"}, []string{"MASTER", "VALUES"}, 1},
+		{`{"ADDRESS":"DEVA","TYPE":"HmIP-WRC2","CHILDREN":["DEVA:0","DEVA:1"],"PARAMSETS":null}`, []string{"DEVA:0", "DEVA:1"}, nil, 0},
+	}
+	for _, c := range cases {
+		var d litesource.DeviceDescription
+		if err := json.Unmarshal([]byte(c.in), &d); err != nil {
+			t.Fatalf("%s: %v", c.in, err)
+		}
+		if strings.Join(d.Children, ",") != strings.Join(c.children, ",") || (d.Children == nil) != (c.children == nil) || strings.Join(d.Paramsets, ",") != strings.Join(c.sets, ",") || d.Version != c.version || string(d.Raw) != c.in {
+			t.Errorf("%s: %+v", c.in, d)
+		}
+	}
+	var d litesource.DeviceDescription
+	if err := json.Unmarshal([]byte(`{"ADDRESS":"X","CHILDREN":7}`), &d); err == nil {
+		t.Error("a number is not a list")
 	}
 }

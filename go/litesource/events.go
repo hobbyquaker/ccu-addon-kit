@@ -145,14 +145,73 @@ type DeviceDescription struct {
 	Raw       json.RawMessage `json:"-"`
 }
 
-// UnmarshalJSON keeps the raw description beside the typed fields.
+// StringList is a list that an interface process may send as a string: the VirtualDevices
+// process answers CHILDREN as "" for a device without children (and a single name as a plain
+// string is conceivable), where rfd and hmipserver send an array. "" is the empty list, a
+// string one entry, an array itself.
+type StringList []string
+
+// UnmarshalJSON takes an array, a string or null.
+func (l *StringList) UnmarshalJSON(b []byte) error {
+	if len(b) > 0 && b[0] == '"' {
+		var s string
+		if err := json.Unmarshal(b, &s); err != nil {
+			return err
+		}
+		if s == "" {
+			*l = []string{}
+		} else {
+			*l = []string{s}
+		}
+		return nil
+	}
+	if string(b) == "null" {
+		*l = nil
+		return nil
+	}
+	var arr []string
+	if err := json.Unmarshal(b, &arr); err != nil {
+		return err
+	}
+	*l = arr
+	return nil
+}
+
+// UnmarshalJSON keeps the raw description beside the typed fields; the list fields take a string
+// as well as an array (StringList), and a VERSION that comes as a string or a float is read too.
 func (d *DeviceDescription) UnmarshalJSON(b []byte) error {
-	type plain DeviceDescription
-	var p plain
+	var p struct {
+		Address   string          `json:"ADDRESS"`
+		Type      string          `json:"TYPE"`
+		Parent    string          `json:"PARENT"`
+		Children  StringList      `json:"CHILDREN"`
+		Firmware  string          `json:"FIRMWARE"`
+		Version   json.RawMessage `json:"VERSION"`
+		Paramsets StringList      `json:"PARAMSETS"`
+		Interface string          `json:"INTERFACE"`
+	}
 	if err := json.Unmarshal(b, &p); err != nil {
 		return err
 	}
-	*d = DeviceDescription(p)
+	*d = DeviceDescription{Address: p.Address, Type: p.Type, Parent: p.Parent, Children: p.Children, Firmware: p.Firmware, Paramsets: p.Paramsets, Interface: p.Interface}
+	if len(p.Version) > 0 && string(p.Version) != "null" {
+		var f float64
+		if err := json.Unmarshal(p.Version, &f); err == nil {
+			d.Version = int(f)
+		} else {
+			var s string
+			if json.Unmarshal(p.Version, &s) == nil {
+				var n int
+				for _, c := range s {
+					if c < '0' || c > '9' {
+						break
+					}
+					n = n*10 + int(c-'0')
+				}
+				d.Version = n
+			}
+		}
+	}
 	d.Raw = append(json.RawMessage(nil), b...)
 	return nil
 }
