@@ -1,0 +1,50 @@
+#!/bin/sh
+#
+#   kit-run [-q] <seconds> <command> [<argument>...]   (ccu-addon-kit, MIT)
+#
+#   Runs the command with a time limit, for the kit's Tcl CGIs (Tcl 8.2 has no 2>@1 and no
+#   timeouts): stdout and stderr merged (-q: stderr dropped), TERM at the limit, KILL two
+#   seconds later, exit 124 on a timeout, the command's exit code otherwise.
+#
+#   The command runs in its own session when setsid exists, so a timeout reaches its children
+#   too (a child left holding the pipe would keep Tcl's exec waiting). The watchdog's own output
+#   goes to /dev/null for the same reason.
+#
+
+quiet=0
+if [ "$1" = "-q" ]; then quiet=1; shift; fi
+limit=$1
+shift
+case "$limit" in ''|*[!0-9]*) echo "kit-run: usage: kit-run [-q] <seconds> <command> [args...]" >&2; exit 2 ;; esac
+[ $# -gt 0 ] || { echo "kit-run: no command" >&2; exit 2; }
+
+flag=${TMPDIR:-/tmp}/kit-run.$$.timeout
+rm -f "$flag"
+
+if command -v setsid >/dev/null 2>&1; then group=1; else group=0; fi
+if [ $quiet = 1 ]; then
+    if [ $group = 1 ]; then setsid "$@" 2>/dev/null </dev/null & else "$@" 2>/dev/null </dev/null & fi
+else
+    if [ $group = 1 ]; then setsid "$@" 2>&1 </dev/null & else "$@" 2>&1 </dev/null & fi
+fi
+pid=$!
+
+(
+    sleep "$limit"
+    : > "$flag"
+    if [ $group = 1 ]; then kill -TERM "-$pid" 2>/dev/null; fi
+    kill -TERM "$pid" 2>/dev/null
+    sleep 2
+    if [ $group = 1 ]; then kill -KILL "-$pid" 2>/dev/null; fi
+    kill -KILL "$pid" 2>/dev/null
+) >/dev/null 2>&1 </dev/null &
+watchdog=$!
+
+wait "$pid"
+rc=$?
+kill "$watchdog" 2>/dev/null
+if [ -f "$flag" ]; then
+    rm -f "$flag"
+    exit 124
+fi
+exit $rc

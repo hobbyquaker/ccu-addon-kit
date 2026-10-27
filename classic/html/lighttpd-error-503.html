@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>@NAME_EN_HTML@</title>
+<!-- ccu-addon-kit (MIT): shown by lighttpd while the addon's own server does not answer.
+     Polls kit/alive.cgi every 3 s and reloads the page once the service runs again. -->
+<style>
+:root { color-scheme: light dark; --bg: #f6f7f9; --fg: #1d2330; --muted: #5d6676; --card: #ffffff; --line: #d9dde4; --accent: #2f6fde; }
+@media (prefers-color-scheme: dark) { :root { --bg: #14171c; --fg: #e6e9ef; --muted: #9aa3b2; --card: #1d2128; --line: #2e343e; --accent: #6d9eff; } }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 34rem; margin: 12vh auto 0; padding: 0 16px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
+h1 { font-size: 1.25rem; margin: 0 0 8px; }
+p { margin: 0 0 8px; color: var(--muted); }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); margin-right: 8px; animation: pulse 1.2s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .dot { animation: none; } }
+</style>
+</head>
+<body>
+<main><div class="card">
+<h1><span class="dot" aria-hidden="true"></span><span id="title"></span></h1>
+<p id="text"></p>
+</div></main>
+<script>
+(function () {
+    var de = /^de\b/i.test(navigator.language || '');
+    document.documentElement.lang = de ? 'de' : 'en';
+    var name = de ? @NAME_DE_JS@ : @NAME_EN_JS@;
+    document.title = name;
+    document.getElementById('title').textContent = de ? name + ' startet …' : name + ' is starting …';
+    document.getElementById('text').textContent = de
+        ? 'Der Dienst antwortet gerade nicht. Die Seite lädt neu, sobald er wieder läuft.'
+        : 'The service is not answering right now. This page reloads as soon as it runs again.';
+    function poll() {
+        var x = new XMLHttpRequest();
+        x.open('GET', @BASE_JS@ + '/kit/alive.cgi', true);
+        x.onload = function () {
+            try { if (JSON.parse(x.responseText).running === true) { location.reload(); return; } } catch (e) {}
+            setTimeout(poll, 3000);
+        };
+        x.onerror = function () { setTimeout(poll, 3000); };
+        x.send();
+    }
+    setTimeout(poll, 3000);
+})();
+</script>
+</body>
+</html>

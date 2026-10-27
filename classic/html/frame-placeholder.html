@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>@NAME_DE_HTML@</title>
+<!-- ccu-addon-kit (MIT): the placeholder page that vendor installs as www/frame/index.html
+     while an addon has no built frame (the Svelte frame comes with occulite-ui). It uses the
+     same CGIs, the same sid handling and the same request header as the frame will:
+     service status and actions, the log tail, the version and the release check. -->
+<style>
+:root { color-scheme: light; --bg: #f6f7f9; --fg: #1d2330; --muted: #5d6676; --card: #ffffff; --line: #d9dde4;
+  --accent: #2f6fde; --ok: #1f8a4c; --bad: #c43c3c; --warn: #b7791f; --idle: #7a8494; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; --bg: #14171c; --fg: #e6e9ef;
+  --muted: #9aa3b2; --card: #1d2128; --line: #2e343e; --accent: #6d9eff; --ok: #45c47e; --bad: #f07272; --warn: #e0a84a; --idle: #8b94a3; } }
+:root[data-theme="dark"] { color-scheme: dark; --bg: #14171c; --fg: #e6e9ef; --muted: #9aa3b2; --card: #1d2128; --line: #2e343e;
+  --accent: #6d9eff; --ok: #45c47e; --bad: #f07272; --warn: #e0a84a; --idle: #8b94a3; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--card); }
+header h1 { font-size: 1.1rem; margin: 0; }
+.ver { color: var(--muted); }
+.pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: 13rem; height: 28px; border-radius: 14px;
+  border: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--c, var(--idle)); flex: none; }
+main { max-width: 64rem; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+h2 { font-size: 1rem; margin: 0 0 12px; }
+button { font: inherit; min-width: 7rem; height: 32px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--bg); color: var(--fg); cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+button.danger { border-color: var(--bad); color: var(--bad); }
+.row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+pre { margin: 12px 0 0; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; overflow: auto;
+  max-height: 24rem; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-all; }
+.notice { padding: 8px 12px; border-left: 3px solid var(--warn); background: var(--bg); margin-top: 12px; }
+.muted { color: var(--muted); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; }
+dt { color: var(--muted); }
+dd { margin: 0; overflow-wrap: anywhere; }
+select { font: inherit; height: 32px; border-radius: 6px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); }
+#overlay, #dialog { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,.45); padding: 16px; }
+#overlay .box, #dialog .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 20px; max-width: 28rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="name"></h1><span class="ver" id="version"></span>
+  <span class="pill" id="pill" title=""></span>
+  <span class="muted" id="who"></span>
+</header>
+<main>
+  <section>
+    <h2 data-t="service"></h2>
+    <div class="row" id="buttons"></div>
+    <dl id="details" style="margin-top:12px"></dl>
+    <div class="notice" id="lastError" hidden></div>
+    <pre id="output" hidden></pre>
+  </section>
+  <section>
+    <h2 data-t="log"></h2>
+    <div class="row"><select id="source" aria-label="log"></select><button id="reloadLog" data-t="refresh"></button></div>
+    <div class="notice" id="logNote" hidden></div>
+    <pre id="logText"></pre>
+  </section>
+  <section>
+    <h2 data-t="about"></h2>
+    <dl id="about"></dl>
+    <div class="row" style="margin-top:12px"><button id="check" data-t="check"></button><span id="checkResult" class="muted"></span></div>
+    <p class="muted" data-t="placeholder"></p>
+  </section>
+</main>
+<div id="dialog" role="dialog" aria-modal="true"><div class="box"><p id="dialogText"></p>
+  <div class="row"><button id="dialogYes" class="danger"></button><button id="dialogNo"></button></div></div></div>
+<div id="overlay" role="alertdialog" aria-modal="true"><div class="box"><p id="overlayText"></p>
+  <div class="row"><button id="overlayRetry" data-t="retry"></button><button id="overlayHome"></button></div></div></div>
+<script>
+(function () {
+    'use strict';
+    var ID = @ID_JS@;
+    var NAME = {de: @NAME_DE_JS@, en: @NAME_EN_JS@};
+    var HEADER = 'X-CCU-Addon-Request';
+    var T = {
+        de: {service: 'Dienst', log: 'Protokoll', about: 'Info', refresh: 'Aktualisieren', check: 'Nach Updates suchen',
+            retry: 'Erneut versuchen', home: 'Zur WebUI', signin: 'Neu anmelden', start: 'Start', stop: 'Stopp', restart: 'Neustart', reload: 'Neu laden',
+            running: 'Läuft', stopped: 'Gestoppt', failed: 'Fehler', busy: 'Bitte warten …', unknown: 'Unbekannt',
+            expired: 'Die Sitzung ist abgelaufen. Bitte die Seite aus der WebUI neu öffnen.',
+            nosession: 'Keine gültige Sitzung. Bitte die Seite aus der WebUI öffnen.',
+            askStop: 'Den Dienst wirklich stoppen?', askRestart: 'Den Dienst wirklich neu starten?', cancel: 'Abbrechen',
+            pid: 'PID', ram: 'RAM', since: 'Läuft seit', installed: 'Installiert', kit: 'ccu-addon-kit', platform: 'System',
+            latest: 'Neueste Version', newer: 'Ein Update ist verfügbar.', current: 'Aktuell.', offline: 'Konnte nicht prüfen (keine Internetverbindung).',
+            checkFailed: 'Konnte nicht prüfen', journal: 'Das Protokoll steht im Systemprotokoll des Systems:', none: 'Keine Einträge.',
+            placeholder: 'Vorläufige Seite: die vollständige Oberfläche folgt mit dem Frame von ccu-addon-kit.'},
+        en: {service: 'Service', log: 'Log', about: 'About', refresh: 'Refresh', check: 'Check for updates',
+            retry: 'Retry', home: 'To the WebUI', signin: 'Sign in again', start: 'Start', stop: 'Stop', restart: 'Restart', reload: 'Reload',
+            running: 'Running', stopped: 'Stopped', failed: 'Failed', busy: 'Please wait …', unknown: 'Unknown',
+            expired: 'The session has expired. Please open this page again from the WebUI.',
+            nosession: 'No valid session. Please open this page from the WebUI.',
+            askStop: 'Really stop the service?', askRestart: 'Really restart the service?', cancel: 'Cancel',
+            pid: 'PID', ram: 'RAM', since: 'Running since', installed: 'Installed', kit: 'ccu-addon-kit', platform: 'System',
+            latest: 'Latest version', newer: 'An update is available.', current: 'Up to date.', offline: 'Could not check (no internet connection).',
+            checkFailed: 'Could not check', journal: 'The log is in the system log:', none: 'No entries.',
+            placeholder: 'Placeholder page: the full interface follows with the ccu-addon-kit frame.'}
+    };
+    var params = new URLSearchParams(location.search);
+    function store(k, v) { try { if (v === undefined) { return sessionStorage.getItem(k); } sessionStorage.setItem(k, v); } catch (e) {} return null; }
+    var sid = params.get('sid');
+    if (sid) {
+        store('kit:' + ID + ':sid', sid);
+        params.delete('sid');
+        var rest = params.toString();
+        history.replaceState(null, '', location.pathname + (rest ? '?' + rest : '') + location.hash);
+    } else {
+        sid = store('kit:' + ID + ':sid');
+    }
+    var theme = params.get('theme');
+    if (theme === 'dark' || theme === 'light') { document.documentElement.dataset.theme = theme; }
+    var lang = params.get('lang') === 'en' || params.get('lang') === 'de' ? params.get('lang')
+        : (/^de\b/i.test(navigator.language || '') ? 'de' : 'en');
+    function t(k) { return (T[lang] && T[lang][k]) || T.en[k] || k; }
+    function $(id) { return document.getElementById(id); }
+    var platform = '', commands = ['start', 'stop', 'restart', 'reload'], busy = false, expired = false;
+
+    function url(cgi, q) {
+        var u = new URLSearchParams(q || {});
+        if (sid) { u.set('sid', sid); }
+        var s = u.toString();
+        return cgi + (s ? '?' + s : '');
+    }
+    function api(cgi, opts) {
+        opts = opts || {};
+        var init = {credentials: 'same-origin', headers: {}};
+        if (opts.form) {
+            init.method = 'POST';
+            init.headers[HEADER] = '1';
+            init.headers['Content-Type'] = 'application/x-www-form-urlencoded';
+            init.body = new URLSearchParams(opts.form).toString();
+        }
+        return fetch(url(cgi, opts.query), init).then(function (r) {
+            return (opts.text ? r.text() : r.json()).then(function (body) {
+                if (!opts.text && body && body.ok === false) {
+                    if (body.error && body.error.code === 'session-invalid') { showExpired(t('expired')); }
+                    var e = new Error(body.error ? body.error.code : 'http-' + r.status);
+                    e.body = body;
+                    throw e;
+                }
+                return {body: body, headers: r.headers};
+            });
+        });
+    }
+    function showExpired(text) {
+        expired = true;
+        $('overlayText').textContent = text;
+        $('overlayHome').textContent = platform === 'openccu-lite' ? t('signin') : t('home');
+        $('overlay').style.display = 'flex';
+    }
+    $('overlayRetry').onclick = function () { $('overlay').style.display = 'none'; expired = false; init(); };
+    $('overlayHome').onclick = function () { if (platform === 'openccu-lite') { location.reload(); } else { location.href = '/'; } };
+    function ask(text, confirm) {
+        return new Promise(function (resolve) {
+            $('dialogText').textContent = text;
+            $('dialogYes').textContent = confirm;
+            $('dialogNo').textContent = t('cancel');
+            $('dialog').style.display = 'flex';
+            $('dialogYes').onclick = function () { $('dialog').style.display = 'none'; resolve(true); };
+            $('dialogNo').onclick = function () { $('dialog').style.display = 'none'; resolve(false); };
+        });
+    }
+    function dd(list, key, value) {
+        var a = document.createElement('dt'); a.textContent = key;
+        var b = document.createElement('dd'); b.textContent = value;
+        list.appendChild(a); list.appendChild(b);
+    }
+    function mb(kb) { var m = kb / 1024; return (m < 10 ? m.toFixed(1) : Math.round(m)) + ' MB'; }
+
+    function view(s, exit) {
+        if (!s || typeof s.running !== 'boolean') { return 'unknown'; }
+        if (s.state === 'starting' || s.state === 'stopping') { return 'busy'; }
+        if (s.running) { return 'running'; }
+        // the convention's transition rule: exit 1 with running false and no state is stopped
+        if (s.state === 'failed') { return 'failed'; }
+        if (exit === 4) { return 'unknown'; }
+        return s.schema === 1 || s.schema === 0 ? 'stopped' : 'unknown';
+    }
+    function renderStatus(s, exit) {
+        var v = busy ? 'busy' : view(s, exit);
+        var colors = {running: 'var(--ok)', stopped: 'var(--idle)', failed: 'var(--bad)', busy: 'var(--warn)', unknown: 'var(--idle)'};
+        var pill = $('pill');
+        pill.style.setProperty('--c', colors[v]);
+        pill.textContent = t(v) + (v === 'running' && s.rss_kb ? ' · ' + t('ram') + ' ' + mb(s.rss_kb) : '');
+        pill.title = pill.textContent;
+        var enabled = {running: ['stop', 'restart', 'reload'], stopped: ['start'], failed: ['start', 'restart'],
+            busy: [], unknown: ['start', 'stop', 'restart']}[v];
+        Array.prototype.forEach.call($('buttons').children, function (b) { b.disabled = enabled.indexOf(b.dataset.cmd) < 0; });
+        var d = $('details'); d.textContent = '';
+        if (s && s.running) {
+            dd(d, t('pid'), String(s.pid));
+            if (s.rss_kb) { dd(d, t('ram'), mb(s.rss_kb)); }
+            if (s.since) { dd(d, t('since'), new Date(s.since * 1000).toLocaleString(lang)); }
+        }
+        $('lastError').hidden = !(s && !s.running && s.lastError);
+        if (s && s.lastError) { $('lastError').textContent = s.lastError; }
+        if (s && s.version) { $('version').textContent = s.version; }
+    }
+    var pollTimer = null, fastUntil = 0;
+    function poll() {
+        clearTimeout(pollTimer);
+        if (expired) { return; }
+        if (document.visibilityState !== 'hidden') {
+            api('kit/service.cgi', {query: {cmd: 'status'}}).then(function (r) {
+                renderStatus(r.body, Number(r.headers.get('X-Kit-Exit')));
+            }).catch(function () { renderStatus(null); });
+        }
+        pollTimer = setTimeout(poll, Date.now() < fastUntil ? 2000 : 10000);
+    }
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') { poll(); } });
+    function run(cmd) {
+        var q = cmd === 'stop' ? ask(t('askStop'), t('stop')) : cmd === 'restart' ? ask(t('askRestart'), t('restart')) : Promise.resolve(true);
+        q.then(function (yes) {
+            if (!yes) { return; }
+            busy = true; renderStatus(null);
+            api('kit/service.cgi', {form: {cmd: cmd}}).then(function (r) { return r.body; }, function (e) { return e.body; })
+                .then(function (b) {
+                    busy = false;
+                    $('output').hidden = false;
+                    $('output').textContent = b ? (b.output || (b.error && b.error.message) || '') : '';
+                    fastUntil = Date.now() + 30000;
+                    poll();
+                });
+        });
+    }
+    function loadLog() {
+        var src = $('source').value;
+        if (!src) { return; }
+        api('kit/log.cgi', {query: {source: src, lines: 200}}).then(function (r) {
+            var b = r.body;
+            $('logNote').hidden = !b.link;
+            if (b.link) {
+                $('logNote').textContent = t('journal') + ' ';
+                var a = document.createElement('a'); a.href = b.link; a.target = '_top'; a.textContent = b.link;
+                $('logNote').appendChild(a);
+            }
+            $('logText').textContent = b.lines && b.lines.length ? b.lines.join('\n') : t('none');
+        }).catch(function () {});
+    }
+    $('reloadLog').onclick = loadLog;
+    $('source').onchange = loadLog;
+    $('check').onclick = function () {
+        $('check').disabled = true;
+        api('kit/version.cgi', {form: {cmd: 'check', force: '1'}}).then(function (r) { return r.body; }, function (e) { return e.body; })
+            .then(function (b) {
+                $('check').disabled = false;
+                if (!b) { return; }
+                if (b.latest) { $('checkResult').textContent = t('latest') + ': ' + b.latest + ' – ' + (b.newer ? t('newer') : t('current')); }
+                else if (b.error === 'offline') { $('checkResult').textContent = t('offline'); }
+                else { $('checkResult').textContent = t('checkFailed') + (b.error ? ' (' + (b.error.code || b.error) + ')' : ''); }
+            });
+    };
+
+    function init() {
+        document.documentElement.lang = lang;
+        document.title = NAME[lang] || NAME.en;
+        $('name').textContent = document.title;
+        Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (el) { el.textContent = t(el.dataset.t); });
+        fetch('frame/addon.json', {credentials: 'same-origin'}).then(function (r) { return r.json(); }).catch(function () { return {}; }).then(function (cfg) {
+            if (cfg.service && cfg.service.commands) { commands = cfg.service.commands; }
+            var box = $('buttons'); box.textContent = '';
+            commands.forEach(function (c) {
+                var b = document.createElement('button');
+                b.dataset.cmd = c; b.textContent = t(c); b.disabled = true;
+                if (c === 'stop') { b.className = 'danger'; }
+                b.onclick = function () { run(c); };
+                box.appendChild(b);
+            });
+            return api('kit/session.cgi');
+        }).then(function (r) {
+            var b = r.body;
+            platform = b.platform.kind;
+            if (b.session.lang && b.session.lang !== 'auto' && !params.get('lang')) { lang = b.session.lang; }
+            if (!b.session.valid) { showExpired(t('nosession')); return; }
+            document.documentElement.lang = lang;
+            Array.prototype.forEach.call(document.querySelectorAll('[data-t]'), function (el) { el.textContent = t(el.dataset.t); });
+            document.title = NAME[lang] || NAME.en; $('name').textContent = document.title;
+            $('who').textContent = (b.session.user || '') + (b.session.level ? ' (' + b.session.level + ')' : '');
+            poll();
+            api('kit/log.cgi').then(function (r2) {
+                var sel = $('source'); sel.textContent = '';
+                r2.body.sources.forEach(function (s) {
+                    var o = document.createElement('option'); o.value = s.id; o.textContent = (s.label && (s.label[lang] || s.label.en)) || s.id;
+                    sel.appendChild(o);
+                });
+                loadLog();
+            }).catch(function () {});
+            api('kit/version.cgi').then(function (r3) {
+                var v = r3.body, a = $('about'); a.textContent = '';
+                dd(a, t('installed'), v.installed || '–');
+                Object.keys(v.components || {}).forEach(function (k) { dd(a, k, v.components[k]); });
+                dd(a, t('kit'), v.kit);
+                dd(a, t('platform'), v.platform.kind + ' ' + v.platform.firmware + ' (' + v.platform.arch + ', Tcl ' + v.platform.tcl + ')');
+            }).catch(function () {});
+        }).catch(function () {});
+    }
+    init();
+})();
+</script>
+</body>
+</html>
