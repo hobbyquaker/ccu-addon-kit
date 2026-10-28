@@ -10,6 +10,7 @@ const good = `{
   "format": 1, "id": "battery", "name": "Battery",
   "description": {"de": "Batterien", "en": "Batteries"},
   "homepage": "https://github.com/hobbyquaker/ccu-addon-battery", "licence": "MIT",
+  "changelog": "https://github.com/hobbyquaker/ccu-addon-battery/blob/main/CHANGELOG.md",
   "release": {"github": "hobbyquaker/ccu-addon-battery", "asset": "battery-{arch}-{version}.tar.gz"},
   "requires": {"architectures": ["aarch64", "x86_64"]},
   "ui": {"icon": "battery/www/icon.svg", "session_header": true},
@@ -24,6 +25,9 @@ func TestParseGood(t *testing.T) {
 	}
 	if m.ID != "battery" || m.Description["de"] != "Batterien" || m.Runtime.Note["en"] != "records battery voltages" {
 		t.Fatalf("%+v", m)
+	}
+	if m.Changelog != "https://github.com/hobbyquaker/ccu-addon-battery/blob/main/CHANGELOG.md" {
+		t.Fatalf("changelog: %q", m.Changelog)
 	}
 	if m.Undeclared() {
 		t.Fatal("daemon: true is a declaration")
@@ -54,6 +58,7 @@ func TestValidateRefusals(t *testing.T) {
 		"icon":         `{"format": 1, "id": "x", "name": "X", "ui": {"icon": "/etc/passwd"}}`,
 		"release":      `{"format": 1, "id": "x", "name": "X", "release": {"github": "nope"}}`,
 		"asset":        `{"format": 1, "id": "x", "name": "X", "release": {"github": "a/b", "asset": "x.tar.gz"}}`,
+		"changelog":    `{"format": 1, "id": "x", "name": "X", "changelog": "javascript:alert(1)"}`,
 		"arch":         `{"format": 1, "id": "x", "name": "X", "requires": {"architectures": ["mips"]}}`,
 	}
 	for name, src := range cases {

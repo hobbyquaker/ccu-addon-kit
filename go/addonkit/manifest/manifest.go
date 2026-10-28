@@ -44,17 +44,20 @@ func (t Text) MarshalJSON() ([]byte, error) {
 
 // Manifest is openccu-lite.json.
 type Manifest struct {
-	Format      int       `json:"format"`
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description Text      `json:"description,omitempty"`
-	Homepage    string    `json:"homepage,omitempty"`
-	Licence     string    `json:"licence,omitempty"`
-	Version     string    `json:"version,omitempty"`
-	Release     *Release  `json:"release,omitempty"`
-	Requires    *Requires `json:"requires,omitempty"`
-	UI          *UI       `json:"ui,omitempty"`
-	Runtime     *Runtime  `json:"runtime,omitempty"`
+	Format      int    `json:"format"`
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description Text   `json:"description,omitempty"`
+	Homepage    string `json:"homepage,omitempty"`
+	// Changelog is an http(s) URL of the release notes (a CHANGELOG.md): the Addons page links it
+	// beside an offered update instead of the release's page.
+	Changelog string    `json:"changelog,omitempty"`
+	Licence   string    `json:"licence,omitempty"`
+	Version   string    `json:"version,omitempty"`
+	Release   *Release  `json:"release,omitempty"`
+	Requires  *Requires `json:"requires,omitempty"`
+	UI        *UI       `json:"ui,omitempty"`
+	Runtime   *Runtime  `json:"runtime,omitempty"`
 }
 
 // Release says where the releases are.
@@ -143,6 +146,9 @@ func Parse(b []byte) (*Manifest, error) {
 
 var idShape = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
 
+// urlShape is the system's rule for the manifest's links.
+var urlShape = regexp.MustCompile(`^https?://[^\s"'<>]+$`)
+
 // Scopes an addon may declare for its own token; the system drops anything else at the mint.
 var Scopes = []string{"meta:read", "meta:write", "system:read", "logs:read", "system:write", "addons:write", "led",
 	"rpc:read", "rpc:operate", "rpc:configure", "rpc:admin"}
@@ -169,6 +175,9 @@ func (m *Manifest) Validate() error {
 	}
 	if strings.TrimSpace(m.Name) == "" {
 		fail("name is empty")
+	}
+	if m.Changelog != "" && !urlShape.MatchString(m.Changelog) {
+		fail("changelog %q is not an http(s) URL", m.Changelog)
 	}
 	if m.Release != nil {
 		if !regexp.MustCompile(`^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$`).MatchString(m.Release.GitHub) {
