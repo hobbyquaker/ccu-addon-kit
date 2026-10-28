@@ -39,7 +39,7 @@ func get(h http.Handler, method, target string, hdr map[string]string) *httptest
 	return w
 }
 
-// B-9: the second build's index.html, same mtime and the same length, answers 200 with its own
+// The second build's index.html, same mtime and the same length, answers 200 with its own
 // content to a revalidation carrying the first one's validators.
 func TestAppFilesUpdateIsNotA304(t *testing.T) {
 	dir := t.TempDir()
