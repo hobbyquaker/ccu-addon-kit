@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 )
@@ -67,9 +68,14 @@ func Admits(need, have Level) bool {
 
 // SessionInfo is what the gate's header told and /state confirmed.
 type SessionInfo struct {
-	ID    string
-	User  string
-	Level Level
+	// ID is the session id; empty for an API token (its secret is never handed on).
+	ID   string
+	User string
+	// Token is the API token's name when the request came with one, "" for a session.
+	Token string
+	// Scopes are the token's scopes as /state answered them; nil for a session.
+	Scopes []string
+	Level  Level
 }
 
 // SessionOptions configure Session.
@@ -89,6 +95,11 @@ type SessionOptions struct {
 	CacheTTL time.Duration
 	// OnRefused is called with the reason when a request is refused; nil logs nothing.
 	OnRefused func(r *http.Request, reason string)
+	// AddonID is the addon's id. On openccu-lite the gate also lets a program in with an API
+	// token of the scope addon:<id> (or Full access, *) and hands the token on in the session
+	// header; the checker admits it only when this is set and the token holds addon:<AddonID>
+	// or *. "" admits no token, as before.
+	AddonID string
 }
 
 // HeaderSession is the header lighttpd's gate adds to every request under /addons/ on openccu-lite.
@@ -97,6 +108,13 @@ const HeaderSession = "X-Occulite-Session"
 // sessionIDShape is the two shapes openccu-lite ever sends: the 26-character base32 id, and the
 // 10-character legacy alias. Nothing else is ever sent to /state.
 var sessionIDShape = regexp.MustCompile(`^(?:[A-Z2-7]{26}|[A-Za-z0-9]{10})$`)
+
+// tokenShape is an API token as occulited mints it and the gate accepts it: olt_ and 32 hex.
+var tokenShape = regexp.MustCompile(`^olt_[0-9a-fA-F]{32}$`)
+
+// HeaderAuth is the header the gate adds beside the session header: what it accepted, "session"
+// or "token" (older systems send none).
+const HeaderAuth = "X-Occulite-Auth"
 
 type ctxKey struct{}
 
@@ -150,12 +168,13 @@ func NewChecker(opts SessionOptions) *Checker {
 // ErrNoSession is answered when the request carries no header the gate would have set.
 var ErrNoSession = errors.New("no session header")
 
-// ErrRefused is answered when occulited did not confirm the id (or it was an API token).
+// ErrRefused is answered when occulited did not confirm the id or the token.
 var ErrRefused = errors.New("session not confirmed")
 
-// Check confirms the header's id against GET /api/auth/v1/state. It trusts the header only on
-// openccu-lite, accepts only the two real id shapes, and refuses an answer without a matching
-// sid (API tokens have none).
+// Check confirms the header's credential against GET /api/auth/v1/state. It trusts the header
+// only on openccu-lite and sends only the shapes the gate hands on to /state: a session id (the
+// answer must carry the same sid), or an API token when AddonID is set (the answer must carry no
+// sid and the scope addon:<AddonID> or *; see TokenLevel for the level).
 func (c *Checker) Check(ctx context.Context, r *http.Request) (*SessionInfo, error) {
 	if c.opts.Platform() != OpenccuLite {
 		return nil, fmt.Errorf("%w: not openccu-lite", ErrNoSession)
@@ -164,13 +183,28 @@ func (c *Checker) Check(ctx context.Context, r *http.Request) (*SessionInfo, err
 	if id == "" {
 		return nil, ErrNoSession
 	}
-	if !sessionIDShape.MatchString(id) {
+	auth := r.Header.Get(HeaderAuth)
+	token := false
+	switch {
+	case sessionIDShape.MatchString(id) && auth != "token":
+	case tokenShape.MatchString(id) && auth != "session":
+		if c.opts.AddonID == "" {
+			return nil, fmt.Errorf("%w: an API token, and this addon admits none", ErrRefused)
+		}
+		token = true
+	default:
 		return nil, fmt.Errorf("%w: id shape", ErrRefused)
 	}
 	if info, ok := c.cached(id); ok {
 		return &info, nil
 	}
-	info, err := c.confirm(ctx, id)
+	var info *SessionInfo
+	var err error
+	if token {
+		info, err = c.confirmToken(ctx, id)
+	} else {
+		info, err = c.confirm(ctx, id)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -178,20 +212,37 @@ func (c *Checker) Check(ctx context.Context, r *http.Request) (*SessionInfo, err
 	return info, nil
 }
 
-type stateAnswer struct {
-	Authenticated bool   `json:"authenticated"`
-	SID           string `json:"sid"`
-	User          string `json:"user"`
-	Level         string `json:"level"`
-	Role          string `json:"role"`
+// TokenLevel is the kit's level of an API token at addon id: admin for Full access (*), user
+// for the scope addon:<id> - it opens the addon's pages as a user's session would, never its
+// admin routes - and unknown when it holds neither (the checker refuses those).
+func TokenLevel(id string, scopes []string) Level {
+	l := LevelUnknown
+	for _, s := range scopes {
+		switch s {
+		case "*":
+			return LevelAdmin
+		case "addon:" + id:
+			l = LevelUser
+		}
+	}
+	return l
 }
 
-func (c *Checker) confirm(ctx context.Context, id string) (*SessionInfo, error) {
+type stateAnswer struct {
+	Authenticated bool     `json:"authenticated"`
+	SID           string   `json:"sid"`
+	User          string   `json:"user"`
+	Level         string   `json:"level"`
+	Role          string   `json:"role"`
+	Scopes        []string `json:"scopes"`
+}
+
+func (c *Checker) state(ctx context.Context, cred string) (*stateAnswer, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.opts.Base+"/api/auth/v1/state", nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+id)
+	req.Header.Set("Authorization", "Bearer "+cred)
 	res, err := c.opts.Client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRefused, err)
@@ -203,6 +254,31 @@ func (c *Checker) confirm(ctx context.Context, id string) (*SessionInfo, error) 
 	var a stateAnswer
 	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&a); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrRefused, err)
+	}
+	return &a, nil
+}
+
+// confirmToken admits an API token: occulited knows it (authenticated, no sid - a session's
+// answer is not a token's), and it holds this addon's scope or Full access.
+func (c *Checker) confirmToken(ctx context.Context, tok string) (*SessionInfo, error) {
+	a, err := c.state(ctx, tok)
+	if err != nil {
+		return nil, err
+	}
+	if !a.Authenticated || a.SID != "" {
+		return nil, ErrRefused
+	}
+	level := TokenLevel(c.opts.AddonID, a.Scopes)
+	if level == LevelUnknown {
+		return nil, fmt.Errorf("%w: the token lacks the scope addon:%s", ErrRefused, c.opts.AddonID)
+	}
+	return &SessionInfo{User: a.User, Token: strings.TrimPrefix(a.User, "token:"), Scopes: a.Scopes, Level: level}, nil
+}
+
+func (c *Checker) confirm(ctx context.Context, id string) (*SessionInfo, error) {
+	a, err := c.state(ctx, id)
+	if err != nil {
+		return nil, err
 	}
 	// the same sid, with or without the CCU's @ wrapping; a token answers no sid at all
 	if !a.Authenticated || a.SID == "" || (a.SID != id && a.SID != "@"+id+"@") {

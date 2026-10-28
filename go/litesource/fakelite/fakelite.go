@@ -23,6 +23,14 @@ type Session struct {
 	Level string
 }
 
+// APIToken is one API token /api/auth/v1/state confirms, as occulited answers a token: the user
+// "token:<Name>", its scopes, no sid, role or level; 401 once Expires has passed.
+type APIToken struct {
+	Name    string
+	Scopes  []string
+	Expires time.Time // zero never expires
+}
+
 // Server is the fake.
 type Server struct {
 	*httptest.Server
@@ -31,6 +39,8 @@ type Server struct {
 	Token string
 	// Sessions maps a session id to what /state answers for it.
 	Sessions map[string]Session
+	// APITokens maps a token's secret (olt_ and 32 hex) to what /state answers for it.
+	APITokens map[string]APIToken
 	// State is what GET /state answers, in order.
 	State []map[string]any
 	// EventID is /state's event_id.
@@ -71,7 +81,7 @@ type sseMsg struct {
 
 // New starts a fake with one interface and no devices.
 func New() *Server {
-	s := &Server{Sessions: map[string]Session{}, Devices: map[string][]map[string]any{}, Paramsets: map[string]map[string]any{},
+	s := &Server{Sessions: map[string]Session{}, APITokens: map[string]APIToken{}, Devices: map[string][]map[string]any{}, Paramsets: map[string]map[string]any{},
 		Values: map[string]map[string]any{}, Interfaces: []string{"HmIP-RF"}, BootID: "boot1", subs: map[chan sseMsg]struct{}{},
 		Meta: map[string]any{"format": 1, "revision": 1, "objects": map[string]any{}, "enums": map[string]any{}}}
 	mux := http.NewServeMux()
@@ -153,7 +163,12 @@ func (s *Server) authState(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	sess, ok := s.Sessions[id]
 	tok := s.Token
+	at, isTok := s.APITokens[id]
 	s.mu.Unlock()
+	if isTok && (at.Expires.IsZero() || time.Now().Before(at.Expires)) {
+		writeJSON(w, map[string]any{"authenticated": true, "user": "token:" + at.Name, "scopes": at.Scopes})
+		return
+	}
 	if ok {
 		role := "user"
 		if sess.Level == "administer" {

@@ -19,7 +19,7 @@ kit_csrf_ok               ;# -> "" when the request may write, else method|heade
 | | CCU3 (eQ-3 firmware) and OpenCCU | openccu-lite |
 | --- | --- | --- |
 | The page gets it | the WebUI opens `<Config-Url>?sid=@xxxxxxxxxx@` in a new tab (the *Einstellungen* button and the Zusatzsoftware page) | the gate lets the request in by its cookie; lighttpd adds `X-Occulite-Session` to every request under `/addons/` and strips a client's copy; `?sid=@...@` is a legacy alias |
-| A CGI checks it | `load tclrega.so; rega_script "Write(system.GetSessionVarStr('<10 chars>'));"`: the second list element is non-empty for a live session | `GET http://127.0.0.1/api/auth/v1/state` with `Authorization: Bearer <header>` must answer `"authenticated":true` and the same `"sid"`; API tokens have no `sid` and are refused |
+| A CGI checks it | `load tclrega.so; rega_script "Write(system.GetSessionVarStr('<10 chars>'));"`: the second list element is non-empty for a live session | `GET http://127.0.0.1/api/auth/v1/state` with `Authorization: Bearer <header>` must answer `"authenticated":true` and the same `"sid"`; API tokens have no `sid` and are refused (the Go checker admits one of the addon's scope, see *API tokens*) |
 | The level | the answer `uid;upl;username;firstname;lastname;`: UPL `8` admin, `2` user, `1` guest | `/state`'s `level` (`administer`, `configure`, `operate`, `read`), else `role` |
 | The language | `/etc/config/userprofiles/<user>.lang`: `0` auto, `1` de, `2` en | the shell's `?lang=` and its cookie (the frame's business) |
 
@@ -34,6 +34,32 @@ Rules the check follows:
   account's level. When the header is missing or not confirmed, `?sid=` is asked at `/state`
   (older images put the session itself there), then through the `tclrega.so` shim, which knows
   the user name only: level `unknown`.
+
+## API tokens (Go, openccu-lite)
+
+openccu-lite's gate also lets a **program** in: an API token with the scope `addon:<id>` of the
+addon behind the path (or Full access, `*`) sent as `Authorization: Bearer olt_...`. The gate
+hands the token itself on in `X-Occulite-Session` and says so in `X-Occulite-Auth: token` (a
+session has `session`); a client's copies of both are removed first.
+
+The Go checker (`addonkit.Session`, `Checker`) admits such a request when the addon sets
+`SessionOptions.AddonID`:
+
+- only the token shape (`olt_` and 32 hex) goes to `/state`, as Bearer like a session id, and
+  the answer must say `"authenticated":true`, carry **no** `sid`, and hold `addon:<AddonID>` or
+  `*` in `scopes`; an unknown or expired token (401), another addon's token, or one with API
+  scopes only is refused with `401 session-invalid`, as is a credential whose shape contradicts
+  `X-Occulite-Auth`;
+- the level: `*` is `admin`, `addon:<id>` is `user` (the addon's pages and the user-level
+  writes, as an `operate`/`configure` session; never `admin` routes). Other scopes add nothing;
+- `FromRequest` answers `User: "token:<name>"`, `Token: "<name>"`, the `Scopes`, and no `ID`
+  (the secret is not handed on); the answer is cached for the TTL like a session's;
+- without `AddonID` no token is admitted (the behaviour before), and on a CCU the header is
+  never trusted at all. The Tcl check (`kit_session_check`) still refuses tokens.
+
+CSRF is unchanged for tokens: a writing request carries `X-CCU-Addon-Request: 1` whatever the
+credential, which any program can send. An addon that serves a read-only API to tools that
+cannot set a header (a Grafana datasource's `POST /search`) mounts those routes outside `CSRF`.
 
 ## Levels
 
