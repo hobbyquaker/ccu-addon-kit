@@ -196,7 +196,9 @@ func TestMeta(t *testing.T) {
 		// the favorite enum's nodes carry a plain string as their name (a real system's snapshot)
 		"favorite": map[string]any{"name": "Favoriten", "tree": []map[string]any{{"id": "start", "name": "Startseite"}}},
 	}
-	s.SetName("HmIP-RF.DEVA", "Fenster Küche", "room/eg/kueche", "favorite/start")
+	s.Meta["enums"].(map[string]any)["function"] = map[string]any{"name": map[string]string{"en": "Functions"}, "tree": []map[string]any{
+		{"id": "licht", "name": map[string]string{"de": "Licht", "en": "Light"}}}}
+	s.SetName("HmIP-RF.DEVA", "Fenster Küche", "room/eg/kueche", "favorite/start", "function/licht")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	names, err := c.Names(ctx)
@@ -208,6 +210,15 @@ func TestMeta(t *testing.T) {
 	}
 	if r := names.RoomNames("HmIP-RF", "DEVA", "en"); r[0] != "Kitchen" {
 		t.Fatalf("rooms en: %v", r)
+	}
+	if f := names.FunctionNames("HmIP-RF", "DEVA", "en"); len(f) != 1 || f[0] != "Light" {
+		t.Fatalf("functions: %v", f)
+	}
+	if f := names.EnumNames("HmIP-RF", "DEVA", "favorite/", "de"); len(f) != 1 || f[0] != "Startseite" {
+		t.Fatalf("favorites: %v", f)
+	}
+	if names.Snapshot() == nil || names.Snapshot().Revision != names.Revision {
+		t.Fatal("the snapshot behind the names")
 	}
 	snap, _ := c.Meta().Snapshot(ctx)
 	if n := snap.NodeName("favorite/start", "de"); n != "Startseite" {

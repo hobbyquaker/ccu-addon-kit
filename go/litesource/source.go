@@ -20,14 +20,34 @@ func (n *Names) Name(iface, address string) string {
 
 // RoomNames answers the names of the rooms the object is in, in lang.
 func (n *Names) RoomNames(iface, address, lang string) []string {
+	return n.EnumNames(iface, address, "room/", lang)
+}
+
+// FunctionNames answers the names of the functions (Gewerke) the object is in, in lang.
+func (n *Names) FunctionNames(iface, address, lang string) []string {
+	return n.EnumNames(iface, address, "function/", lang)
+}
+
+// EnumNames answers the names, in lang, of the nodes of one enum the object is in: prefix is
+// the enum's path prefix ("room/", "function/", "favorite/").
+func (n *Names) EnumNames(iface, address, prefix, lang string) []string {
 	if n == nil || n.snap == nil {
 		return nil
 	}
 	var out []string
-	for _, p := range n.Objects[iface+"."+address].Rooms() {
+	for _, p := range n.Objects[iface+"."+address].pathsOf(prefix) {
 		out = append(out, n.snap.NodeName(p, lang))
 	}
 	return out
+}
+
+// Snapshot answers the metadata snapshot the names were read from (nil for Names built without
+// one), for a consumer that needs the enum trees themselves.
+func (n *Names) Snapshot() *MetaSnapshot {
+	if n == nil {
+		return nil
+	}
+	return n.snap
 }
 
 // Source is the seam between an addon and the system it runs on: openccu-lite here, a classic
