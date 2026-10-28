@@ -74,11 +74,18 @@ func (c *Client) logf(format string, args ...any) {
 
 // do sends one request and decodes a JSON answer into out (nil skips the body).
 func (c *Client) do(ctx context.Context, method, path string, body any, out any) error {
+	_, err := c.send(ctx, method, path, body, out)
+	return err
+}
+
+// send is do that also answers the answer's header. A status other than 2xx is an *HTTPError,
+// a 304 included (the metadata API's "nothing changed"; the caller that expects one checks it).
+func (c *Client) send(ctx context.Context, method, path string, body any, out any) (http.Header, error) {
 	var rd io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		rd = bytes.NewReader(b)
 	}
@@ -86,7 +93,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, rd)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -94,12 +101,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 	req.Header.Set("Accept", "application/json")
 	res, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer res.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(res.Body, 64<<20))
 	if err != nil {
-		return err
+		return res.Header, err
 	}
 	if res.StatusCode/100 != 2 {
 		he := &HTTPError{Status: res.StatusCode, Body: string(data)}
@@ -112,12 +119,12 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		if n, err := strconv.Atoi(strings.TrimSpace(res.Header.Get("Retry-After"))); err == nil && n > 0 {
 			he.RetryAfter = time.Duration(n) * time.Second
 		}
-		return he
+		return res.Header, he
 	}
 	if out == nil || len(data) == 0 {
-		return nil
+		return res.Header, nil
 	}
-	return json.Unmarshal(data, out)
+	return res.Header, json.Unmarshal(data, out)
 }
 
 // Version is the open probe GET /api/meta/v1/version: the answer of an openccu-lite system.

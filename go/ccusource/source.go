@@ -226,6 +226,48 @@ func (s *Source) iface(ctx context.Context, name string) (*iface, error) {
 	return nil, fmt.Errorf("ccusource: unknown interface %q", name)
 }
 
+// Call sends one XML-RPC call to an interface process and answers the result as JSON, so an
+// addon has one Call for both platforms (litesource.Client.Call is the openccu-lite one). A
+// litesource.Double parameter, at any depth of a map or slice, goes as a double, as it does
+// through lite-rpc; a process's fault is a *Fault with its code and message.
+func (s *Source) Call(ctx context.Context, iface, method string, params ...any) (json.RawMessage, error) {
+	i, err := s.iface(ctx, iface)
+	if err != nil {
+		return nil, err
+	}
+	conv := make([]any, len(params))
+	for n, p := range params {
+		conv[n] = xmlrpcParam(p)
+	}
+	v, err := i.client.Call(ctx, method, conv...)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(v)
+}
+
+// xmlrpcParam turns the JSON-oriented values a litesource caller builds (Double, nested maps and
+// slices of them) into what the XML-RPC encoder takes.
+func xmlrpcParam(v any) any {
+	switch x := v.(type) {
+	case litesource.Double:
+		return float64(x)
+	case map[string]any:
+		out := make(map[string]any, len(x))
+		for k, e := range x {
+			out[k] = xmlrpcParam(e)
+		}
+		return out
+	case []any:
+		out := make([]any, len(x))
+		for n, e := range x {
+			out[n] = xmlrpcParam(e)
+		}
+		return out
+	}
+	return v
+}
+
 // --- devices ---------------------------------------------------------------------------
 
 // toJSON re-encodes a decoded XML-RPC value as JSON (the Raw of a description, a RawValue).

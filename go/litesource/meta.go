@@ -3,7 +3,9 @@ package litesource
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -132,6 +134,51 @@ func (m Meta) Snapshot(ctx context.Context) (*MetaSnapshot, error) {
 	var s MetaSnapshot
 	err := m.c.do(ctx, http.MethodGet, "/api/meta/v1/snapshot", nil, &s)
 	return &s, err
+}
+
+// ObjectPatch is the body of PATCH /api/meta/v1/objects/{ref} (occulited's meta-api.md): a
+// field left nil is left alone.
+type ObjectPatch struct {
+	// Name sets the object's name (the store refuses an empty one).
+	Name *string
+	// Enums replaces the object's memberships (an empty slice: none).
+	Enums *[]string
+	// Meta is merged per namespace: a value replaces that namespace whole, nil removes it. An
+	// addon writes its own namespace only (the token's meta:write scope).
+	Meta map[string]any
+}
+
+// PatchObject creates or updates the object <iface>.<address> and answers the store's revision
+// after the write and whether it changed anything: the store answers a write that changes
+// nothing with 304, which is not an error here.
+func (m Meta) PatchObject(ctx context.Context, iface, address string, p ObjectPatch) (revision int64, changed bool, err error) {
+	body := map[string]any{}
+	if p.Name != nil {
+		body["name"] = *p.Name
+	}
+	if p.Enums != nil {
+		enums := *p.Enums
+		if enums == nil {
+			enums = []string{}
+		}
+		body["enums"] = enums
+	}
+	if p.Meta != nil {
+		body["meta"] = p.Meta
+	}
+	var res struct {
+		Revision int64 `json:"revision"`
+	}
+	hdr, err := m.c.send(ctx, http.MethodPatch, "/api/meta/v1/objects/"+url.PathEscape(iface+"."+address), body, &res)
+	var he *HTTPError
+	if errors.As(err, &he) && he.Status == http.StatusNotModified {
+		rev, _ := strconv.ParseInt(strings.Trim(hdr.Get("ETag"), `"`), 10, 64)
+		return rev, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return res.Revision, true, nil
 }
 
 // MetaEvent is one event of the change stream. Kind resync means: read the snapshot again.

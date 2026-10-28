@@ -8,6 +8,7 @@ package fakelite
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -42,6 +43,8 @@ type Server struct {
 	// Meta is the snapshot; MetaEvents what the change stream replays after `since`.
 	Meta       map[string]any
 	MetaEvents []map[string]any
+	// MetaWrites are the PATCH /objects/{ref} bodies received, "<ref> <body>", oldest first.
+	MetaWrites []string
 	// Interfaces is GET /interfaces and the hello's list.
 	Interfaces []string
 	BootID     string
@@ -81,6 +84,7 @@ func New() *Server {
 	mux.HandleFunc("/api/rpc/v1/paramsets/", s.auth(s.paramsetsFor))
 	mux.HandleFunc("/api/rpc/v1/json/", s.auth(s.jsonrpc))
 	mux.HandleFunc("/api/meta/v1/snapshot", s.auth(s.snapshot))
+	mux.HandleFunc("/api/meta/v1/objects/", s.auth(s.patchObject))
 	mux.HandleFunc("/api/meta/v1/events/sse", s.auth(s.metaEvents))
 	s.StartingRetryAfter = 5
 	s.Server = httptest.NewServer(s.starting(mux))
@@ -577,6 +581,90 @@ func (s *Server) SetName(ref, name string, enums ...string) int64 {
 	ev := map[string]any{"revision": rev, "kind": "object.updated", "ref": ref, "value": o}
 	s.MetaEvents = append(s.MetaEvents, ev)
 	return rev
+}
+
+// patchObject is PATCH /api/meta/v1/objects/{ref} as occulited answers it: name, enums and meta
+// (merged per namespace, null removes one); 200 {"revision"} when it changed something, else 304
+// with the unchanged revision in the ETag; an empty name is 422 invalid-body.
+func (s *Server) patchObject(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	ref := strings.TrimPrefix(r.URL.Path, "/api/meta/v1/objects/")
+	var body map[string]json.RawMessage
+	b, _ := io.ReadAll(r.Body)
+	if err := json.Unmarshal(b, &body); err != nil {
+		w.WriteHeader(400)
+		fmt.Fprint(w, `{"error":"invalid-body"}`)
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.MetaWrites = append(s.MetaWrites, ref+" "+string(b))
+	objs, _ := s.Meta["objects"].(map[string]any)
+	if objs == nil {
+		objs = map[string]any{}
+		s.Meta["objects"] = objs
+	}
+	// the object as plain JSON values, whatever the test put there
+	var o map[string]any
+	before, _ := json.Marshal(objs[ref])
+	json.Unmarshal(before, &o)
+	if o == nil {
+		o = map[string]any{}
+	}
+	if raw, ok := body["name"]; ok {
+		var name string
+		if json.Unmarshal(raw, &name) != nil || name == "" {
+			w.WriteHeader(422)
+			fmt.Fprint(w, `{"error":"invalid-body","message":"name must not be empty"}`)
+			return
+		}
+		o["name"] = name
+	}
+	if raw, ok := body["enums"]; ok {
+		var enums []any
+		json.Unmarshal(raw, &enums)
+		if len(enums) == 0 {
+			delete(o, "enums")
+		} else {
+			o["enums"] = enums
+		}
+	}
+	if raw, ok := body["meta"]; ok {
+		var patch map[string]any
+		json.Unmarshal(raw, &patch)
+		m, _ := o["meta"].(map[string]any)
+		if m == nil {
+			m = map[string]any{}
+		}
+		for ns, v := range patch {
+			if v == nil {
+				delete(m, ns)
+			} else {
+				m[ns] = v
+			}
+		}
+		if len(m) == 0 {
+			delete(o, "meta")
+		} else {
+			o["meta"] = m
+		}
+	}
+	rev := toInt(s.Meta["revision"])
+	after, _ := json.Marshal(o)
+	if _, existed := objs[ref]; existed && string(after) == string(before) {
+		w.Header().Set("ETag", strconv.FormatInt(rev, 10))
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	objs[ref] = o
+	rev++
+	s.Meta["revision"] = rev
+	s.MetaEvents = append(s.MetaEvents, map[string]any{"revision": rev, "kind": "object.updated", "ref": ref, "value": o})
+	w.Header().Set("ETag", strconv.FormatInt(rev, 10))
+	writeJSON(w, map[string]any{"revision": rev})
 }
 
 func toInt(v any) int64 {

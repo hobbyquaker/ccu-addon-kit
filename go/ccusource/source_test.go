@@ -29,6 +29,8 @@ type daemon struct {
 	cbID    string
 	srv     *httptest.Server
 	devices []any
+	// last are the parameters of the last putParamset
+	last []any
 }
 
 func newDaemon(t *testing.T) *daemon {
@@ -64,6 +66,11 @@ func newDaemon(t *testing.T) *daemon {
 			}
 		case "getParamset":
 			res = map[string]any{"OPERATING_VOLTAGE": 2.95, "LOW_BAT": false, "UNREACH": false}
+		case "putParamset":
+			d.mu.Lock()
+			d.last = params
+			d.mu.Unlock()
+			res = ""
 		case "init":
 			url, _ := params[0].(string)
 			id, _ := params[1].(string)

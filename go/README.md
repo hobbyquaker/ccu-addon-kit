@@ -37,8 +37,16 @@ The Go port of occulite-client's protocol handling, as far as a recording addon 
 | `State(ctx, Filter)` | the state store, every page, with the `event_id` to resume from |
 | `History`, `Paramsets`, `ParamsetsFor`, `ListDevices`, `GetParamset`, `Call` | the rest of lite-rpc over JSON-RPC (`Double` sends a `double`) |
 | `Meta().Snapshot`, `Meta().Events(ctx, since)` | the metadata API; a gap in the revisions or a reconnect is a `resync` event |
-| `Source` | the seam an addon records against (`Seed`, `Subscribe`, `Devices`, `Read`, `Descriptions`, `Names`, `NameEvents`); `*Client` implements it, a classic-CCU implementation comes with the first addon that needs one |
-| `fakelite` | a fake openccu-lite for tests: an `httptest` server with the state store, the stream (ids, hello, resume, resync, reboot), JSON-RPC, the paramset cache, the metadata snapshot and stream, `/api/auth/v1/state`, and the boot-time 503 `starting` answers (`SetStarting(n)`) |
+| `Meta().PatchObject(ctx, iface, address, ObjectPatch)` | `PATCH /api/meta/v1/objects/{ref}`: the name, the enums, `meta` merged per namespace (a nil value removes one); answers the revision and whether anything changed - the store's 304 for a write that changes nothing is not an error |
+| `Source` | the seam an addon records against (`Seed`, `Subscribe`, `Devices`, `Read`, `Descriptions`, `Names`, `NameEvents`); `*Client` implements it, `ccusource.Source` is the classic CCU's, over XML-RPC and ReGa |
+| `fakelite` | a fake openccu-lite for tests: an `httptest` server with the state store, the stream (ids, hello, resume, resync, reboot), JSON-RPC, the paramset cache, the metadata snapshot, stream and object writes (`MetaWrites`), `/api/auth/v1/state`, and the boot-time 503 `starting` answers (`SetStarting(n)`) |
+
+## `ccusource`
+
+The classic CCU (CCU3, OpenCCU) behind the same `litesource.Source` seam: the interface processes
+from `InterfacesList.xml` over XML-RPC with an `init` callback for the events, the names and rooms
+from ReGa. `Call(ctx, iface, method, params...)` is the classic side of `litesource.Client.Call`:
+the answer as JSON, a `litesource.Double` at any depth sent as a double, a fault as `*Fault`.
 
 What a read costs on air is the caller's concern: HmIP `VALUES` come from hmipserver's cache, a
 BidCos `VALUES` read of a value channel is a radio frame; channel 0 and `MASTER` are free on both.
