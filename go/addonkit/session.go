@@ -76,6 +76,9 @@ type SessionInfo struct {
 	// Scopes are the token's scopes as /state answered them; nil for a session.
 	Scopes []string
 	Level  Level
+	// Public marks the public mode's anonymous viewer (openccu-lite's kiosk, X-Occulite-Auth:
+	// public): no ID, no User, LevelGuest, and only on a GET or HEAD the addon marked public.
+	Public bool
 }
 
 // SessionOptions configure Session.
@@ -100,6 +103,14 @@ type SessionOptions struct {
 	// header; the checker admits it only when this is set and the token holds addon:<AddonID>
 	// or *. "" admits no token, as before.
 	AddonID string
+	// Public marks the requests openccu-lite's public mode (the Control app's kiosk) may make
+	// without a session: the gate lets an anonymous GET/HEAD under a path of an addon view through
+	// with X-Occulite-Auth: public and no session header. The checker admits such a request as
+	// the read-only viewer (SessionInfo.Public, LevelGuest) only on a GET or HEAD for which this
+	// answers true - mark exactly what the addon's views need, nothing that writes, exports or
+	// shows settings. nil admits no public request (the behaviour before). The request's path is
+	// the one the checker sees: with the addon's base path when the checker wraps the prefix strip.
+	Public func(r *http.Request) bool
 }
 
 // HeaderSession is the header lighttpd's gate adds to every request under /addons/ on openccu-lite.
@@ -113,7 +124,8 @@ var sessionIDShape = regexp.MustCompile(`^(?:[A-Z2-7]{26}|[A-Za-z0-9]{10})$`)
 var tokenShape = regexp.MustCompile(`^olt_[0-9a-fA-F]{32}$`)
 
 // HeaderAuth is the header the gate adds beside the session header: what it accepted, "session"
-// or "token" (older systems send none).
+// or "token" (older systems send none) - or "public", without a session header, for the public
+// mode's anonymous viewer of an addon view.
 const HeaderAuth = "X-Occulite-Auth"
 
 type ctxKey struct{}
@@ -180,10 +192,13 @@ func (c *Checker) Check(ctx context.Context, r *http.Request) (*SessionInfo, err
 		return nil, fmt.Errorf("%w: not openccu-lite", ErrNoSession)
 	}
 	id := r.Header.Get(HeaderSession)
+	auth := r.Header.Get(HeaderAuth)
+	if id == "" && auth == "public" {
+		return c.public(r)
+	}
 	if id == "" {
 		return nil, ErrNoSession
 	}
-	auth := r.Header.Get(HeaderAuth)
 	token := false
 	switch {
 	case sessionIDShape.MatchString(id) && auth != "token":
@@ -210,6 +225,25 @@ func (c *Checker) Check(ctx context.Context, r *http.Request) (*SessionInfo, err
 	}
 	c.remember(id, *info)
 	return info, nil
+}
+
+// ErrNotPublic is answered for the public mode's viewer on a request the addon did not mark public.
+var ErrNotPublic = errors.New("not a public route")
+
+// public admits the public mode's viewer where the addon marked the request public. Nothing is
+// asked of occulited: the gate sets the header only for the public mode's pass (a client's copy
+// is removed first), and Check trusts it on openccu-lite alone.
+func (c *Checker) public(r *http.Request) (*SessionInfo, error) {
+	if c.opts.Public == nil {
+		return nil, fmt.Errorf("%w: the public mode's viewer, and this addon marks no route public", ErrNoSession)
+	}
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		return nil, fmt.Errorf("%w: %s by the public mode's viewer", ErrNotPublic, r.Method)
+	}
+	if !c.opts.Public(r) {
+		return nil, fmt.Errorf("%w: %s", ErrNotPublic, r.URL.Path)
+	}
+	return &SessionInfo{Level: LevelGuest, Public: true}, nil
 }
 
 // TokenLevel is the kit's level of an API token at addon id: admin for Full access (*), user
@@ -338,7 +372,8 @@ func (c *Checker) Handler(next http.Handler) http.Handler {
 			c.refuse(w, r, http.StatusUnauthorized, "session-invalid", err.Error())
 			return
 		}
-		if !Admits(c.opts.Need, info.Level) {
+		// the public viewer is on a route the addon marked public: that is its admission, not Need
+		if !info.Public && !Admits(c.opts.Need, info.Level) {
 			c.refuse(w, r, http.StatusForbidden, "forbidden", "level "+info.Level.String())
 			return
 		}

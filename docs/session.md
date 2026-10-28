@@ -57,6 +57,26 @@ The Go checker (`addonkit.Session`, `Checker`) admits such a request when the ad
 - without `AddonID` no token is admitted (the behaviour before), and on a CCU the header is
   never trusted at all. The Tcl check (`kit_session_check`) still refuses tokens.
 
+### The public mode's viewer (Go, openccu-lite)
+
+openccu-lite's Control app has a public mode (a kiosk without a login). While it is on, the gate
+lets an anonymous **GET or HEAD** under the path of an addon's registered App view through with
+`X-Occulite-Auth: public` and **no** `X-Occulite-Session` (a client's copies are removed first).
+The Go checker admits such a request only where the addon says so, with
+`SessionOptions.Public func(*http.Request) bool`:
+
+- a GET or HEAD for which `Public` answers true is the read-only viewer: `FromRequest` answers
+  `Public: true`, level `guest`, no `ID`, no `User`. The handler's `Need` does not apply (marking
+  the route is the admission); a route wrapped in `Require(user)` or `Require(admin)` still
+  refuses it with `403 forbidden`;
+- any other method, a route `Public` does not mark, or an addon without `Public` (the behaviour
+  before) is `401 session-invalid` - the frame then offers the login, which is the way to more;
+- nothing is asked of occulited, and on a CCU the header is never trusted.
+
+Mark exactly what the views need - their pages, the app's files, the reads they make - and
+nothing that writes, exports, or shows the addon's settings. The path `Public` sees is the one the
+checker sees: with the addon's base path when the checker wraps the prefix strip.
+
 CSRF is unchanged for tokens: a writing request carries `X-CCU-Addon-Request: 1` whatever the
 credential, which any program can send. An addon that serves a read-only API to tools that
 cannot set a header (a Grafana datasource's `POST /search`) mounts those routes outside `CSRF`.
