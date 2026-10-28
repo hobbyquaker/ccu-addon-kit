@@ -30,13 +30,14 @@ The Go port of occulite-client's protocol handling, as far as a recording addon 
 | | |
 | --- | --- |
 | `New(base, token)` | a client of `http://127.0.0.1` with a `TokenSource` |
-| `Probe(ctx)` | openccu-lite, a CCU (`ErrNotOpenccuLite`) or unreachable |
+| `Probe(ctx)` | openccu-lite, a CCU (`ErrNotOpenccuLite`: a 404, an HTML page or JSON that is not the metadata API), a system that does not answer its API yet (`*NotReadyError`: a 502/503/504 or the `{"error":"starting"}` openccu-lite's lighttpd answers at boot until occulited is up, with its `Retry-After`) or unreachable (any other error) |
+| `Await(ctx, lite)` | probes until the system answers: a `NotReadyError` or an unreachable system is retried after its `Retry-After`, else `ProbeRetry` (5 s); `ErrNotOpenccuLite` ends the wait unless `lite` says the platform rule already recognised openccu-lite (`addonkit.IsOpenccuLite()`) - a daemon's start loop, which must never take a boot-time 503 for a CCU |
 | `Events(ctx, Filter, lastEventID)` | `GET /api/rpc/v1/events` as a channel of typed messages: reconnects with backoff, resumes with `Last-Event-ID`, takes 45 s of silence as a dead connection, and delivers one `resync` per reconnection whenever values may have been missed (the server's own, a hello of another boot, a reconnect without an id) - after which the consumer reads `State` again |
 | `State(ctx, Filter)` | the state store, every page, with the `event_id` to resume from |
 | `History`, `Paramsets`, `ParamsetsFor`, `ListDevices`, `GetParamset`, `Call` | the rest of lite-rpc over JSON-RPC (`Double` sends a `double`) |
 | `Meta().Snapshot`, `Meta().Events(ctx, since)` | the metadata API; a gap in the revisions or a reconnect is a `resync` event |
 | `Source` | the seam an addon records against (`Seed`, `Subscribe`, `Devices`, `Read`, `Descriptions`, `Names`, `NameEvents`); `*Client` implements it, a classic-CCU implementation comes with the first addon that needs one |
-| `fakelite` | a fake openccu-lite for tests: an `httptest` server with the state store, the stream (ids, hello, resume, resync, reboot), JSON-RPC, the paramset cache, the metadata snapshot and stream, and `/api/auth/v1/state` |
+| `fakelite` | a fake openccu-lite for tests: an `httptest` server with the state store, the stream (ids, hello, resume, resync, reboot), JSON-RPC, the paramset cache, the metadata snapshot and stream, `/api/auth/v1/state`, and the boot-time 503 `starting` answers (`SetStarting(n)`) |
 
 What a read costs on air is the caller's concern: HmIP `VALUES` come from hmipserver's cache, a
 BidCos `VALUES` read of a value channel is a radio frame; channel 0 and `MASTER` are free on both.

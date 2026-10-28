@@ -53,6 +53,13 @@ type Server struct {
 	StreamQueries []string
 	// Ping is the stream's heartbeat interval; 0 means none.
 	Ping time.Duration
+	// Starting is how many more requests (any route) are answered as openccu-lite's lighttpd
+	// answers while occulited is not up: 503 {"error":"starting",...} with Retry-After:
+	// StartingRetryAfter seconds (5 like the real one; 0 sends no header). -1 is "until set to 0".
+	Starting           int
+	StartingRetryAfter int
+	// StartingSeen counts the requests answered that way.
+	StartingSeen int
 }
 
 type sseMsg struct {
@@ -75,8 +82,42 @@ func New() *Server {
 	mux.HandleFunc("/api/rpc/v1/json/", s.auth(s.jsonrpc))
 	mux.HandleFunc("/api/meta/v1/snapshot", s.auth(s.snapshot))
 	mux.HandleFunc("/api/meta/v1/events/sse", s.auth(s.metaEvents))
-	s.Server = httptest.NewServer(mux)
+	s.StartingRetryAfter = 5
+	s.Server = httptest.NewServer(s.starting(mux))
 	return s
+}
+
+// starting answers as lighttpd's occulite-starting.lua does while Starting says so.
+func (s *Server) starting(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		n, retry := s.Starting, s.StartingRetryAfter
+		if n != 0 {
+			s.StartingSeen++
+			if n > 0 {
+				s.Starting--
+			}
+		}
+		s.mu.Unlock()
+		if n == 0 {
+			h.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store")
+		if retry > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(retry))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(503)
+		fmt.Fprint(w, `{"error":"starting","message":"occulited is not answering yet","unit":{"state":"starting"}}`+"\n")
+	})
+}
+
+// SetStarting sets Starting under the lock (a test changes it while the client probes).
+func (s *Server) SetStarting(n int) {
+	s.mu.Lock()
+	s.Starting = n
+	s.mu.Unlock()
 }
 
 func (s *Server) auth(h http.HandlerFunc) http.HandlerFunc {

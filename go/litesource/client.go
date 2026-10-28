@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,6 +54,9 @@ type HTTPError struct {
 	Status int
 	Code   string
 	Body   string
+	// RetryAfter is the answer's Retry-After in seconds, 0 when it named none (openccu-lite's
+	// lighttpd says 5 while occulited is not answering).
+	RetryAfter time.Duration
 }
 
 func (e *HTTPError) Error() string {
@@ -105,6 +109,9 @@ func (c *Client) do(ctx context.Context, method, path string, body any, out any)
 		if json.Unmarshal(data, &e) == nil {
 			he.Code = e.Error
 		}
+		if n, err := strconv.Atoi(strings.TrimSpace(res.Header.Get("Retry-After"))); err == nil && n > 0 {
+			he.RetryAfter = time.Duration(n) * time.Second
+		}
 		return he
 	}
 	if out == nil || len(data) == 0 {
@@ -127,14 +134,39 @@ type Version struct {
 // metadata API (a CCU: 404 or HTML).
 var ErrNotOpenccuLite = errors.New("not openccu-lite")
 
-// Probe tells openccu-lite (a Version), a CCU (ErrNotOpenccuLite) and an unreachable system
-// (any other error: still booting, retry) apart.
+// NotReadyError is Probe's answer when the system is there but does not answer the API yet: a
+// 502, 503 or 504, or openccu-lite's {"error":"starting"} - lighttpd's answer while occulited is
+// not up (at boot, during a restart). Retry, after RetryAfter when the answer named one.
+type NotReadyError struct {
+	Status     int
+	Code       string
+	RetryAfter time.Duration
+}
+
+func (e *NotReadyError) Error() string {
+	if e.Code != "" {
+		return fmt.Sprintf("the system is not ready yet (http %d %s)", e.Status, e.Code)
+	}
+	return fmt.Sprintf("the system is not ready yet (http %d)", e.Status)
+}
+
+// Probe tells openccu-lite (a Version), a CCU (ErrNotOpenccuLite) and a system that does not
+// answer yet (a *NotReadyError for a 502/503/504 or {"error":"starting"}, any other error when it
+// is unreachable: still booting, retry) apart. Only a 404, an HTML answer or a JSON answer that is
+// not the metadata API say "not openccu-lite" - at boot, openccu-lite's lighttpd answers 503
+// {"error":"starting"} until occulited is up, and that is not a CCU.
 func (c *Client) Probe(ctx context.Context) (*Version, error) {
 	var v Version
 	err := c.do(ctx, http.MethodGet, "/api/meta/v1/version", nil, &v)
 	var he *HTTPError
 	if errors.As(err, &he) {
-		return nil, ErrNotOpenccuLite
+		switch {
+		case he.Status == 502 || he.Status == 503 || he.Status == 504 || he.Code == "starting":
+			return nil, &NotReadyError{Status: he.Status, Code: he.Code, RetryAfter: he.RetryAfter}
+		case he.Status == 404 || looksHTML(he.Body):
+			return nil, ErrNotOpenccuLite
+		}
+		return nil, he
 	}
 	if err != nil {
 		var se *json.SyntaxError
@@ -147,6 +179,58 @@ func (c *Client) Probe(ctx context.Context) (*Version, error) {
 		return nil, ErrNotOpenccuLite
 	}
 	return &v, nil
+}
+
+// looksHTML says whether a body is an HTML document (a CCU's error page) rather than JSON.
+func looksHTML(body string) bool {
+	t := strings.ToLower(strings.TrimSpace(body))
+	return strings.HasPrefix(t, "<!doctype html") || strings.HasPrefix(t, "<html")
+}
+
+// ProbeRetry is how long Await waits between probes when the system named no Retry-After; 5 s by
+// default (a test shortens it).
+var ProbeRetry = 5 * time.Second
+
+// Await probes until the system answers the metadata API and returns its Version. A system that
+// says it is not ready (NotReadyError) or does not answer at all is probed again after its
+// Retry-After, else after ProbeRetry. ErrNotOpenccuLite ends the wait - unless lite is true: on a
+// system the platform rule already recognised as openccu-lite (addonkit.IsOpenccuLite) the answer
+// is a hiccup of its web server, never a CCU, so the wait goes on. The context's end returns
+// ctx.Err(). Every reason is logged through Log when it first appears and then at most once a
+// minute while it persists, so a long boot does not flood the journal.
+func (c *Client) Await(ctx context.Context, lite bool) (*Version, error) {
+	var lastMsg string
+	var lastLog time.Time
+	for {
+		v, err := c.Probe(ctx)
+		if err == nil {
+			return v, nil
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if errors.Is(err, ErrNotOpenccuLite) && !lite {
+			return nil, err
+		}
+		wait := ProbeRetry
+		var nr *NotReadyError
+		if errors.As(err, &nr) && nr.RetryAfter > 0 {
+			wait = nr.RetryAfter
+		}
+		msg := err.Error()
+		if errors.Is(err, ErrNotOpenccuLite) {
+			msg = "the system does not answer its API yet (not openccu-lite?)"
+		}
+		if msg != lastMsg || time.Since(lastLog) >= time.Minute {
+			c.logf("waiting for the system: %s", msg)
+			lastMsg, lastLog = msg, time.Now()
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+	}
 }
 
 // Interface is one entry of GET /api/rpc/v1/interfaces.

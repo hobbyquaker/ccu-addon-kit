@@ -3,7 +3,12 @@ package litesource_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -270,4 +275,147 @@ func TestEventsInterfaceFilter(t *testing.T) {
 		t.Fatalf("an event of another interface came through: %+v", m.Event)
 	}
 	cancel()
+}
+
+// TestProbeTellsStartingFromNotLite: openccu-lite's lighttpd answers 503 {"error":"starting"}
+// with Retry-After while occulited is not up - that is "not ready", never "not openccu-lite";
+// a 404, an HTML page or JSON that is not the metadata API is a CCU; an unreachable system is
+// any other error.
+func TestProbeTellsStartingFromNotLite(t *testing.T) {
+	s := fakelite.New()
+	defer s.Close()
+	c := newClient(t, s)
+	s.SetStarting(1)
+	_, err := c.Probe(context.Background())
+	var nr *litesource.NotReadyError
+	if !errors.As(err, &nr) || nr.Status != 503 || nr.Code != "starting" || nr.RetryAfter != 5*time.Second {
+		t.Fatalf("503 starting is NotReadyError with Retry-After 5 s: %v", err)
+	}
+	if errors.Is(err, litesource.ErrNotOpenccuLite) {
+		t.Fatal("503 starting must not be ErrNotOpenccuLite")
+	}
+	if v, err := c.Probe(context.Background()); err != nil || v.API != "meta" {
+		t.Fatalf("after the start: %v %+v", err, v)
+	}
+
+	for _, tc := range []struct {
+		name    string
+		status  int
+		ctype   string
+		body    string
+		notLite bool
+		ready   bool
+	}{
+		{"ccu 404 html", 404, "text/html", "<html><body>404 Not Found</body></html>", true, false},
+		{"html 200", 200, "text/html", "<!DOCTYPE html><html><body>CCU</body></html>", true, false},
+		{"json not meta", 200, "application/json", `{"api":"rega"}`, true, false},
+		{"502 proxy html", 502, "text/html", "<!DOCTYPE html><html><body>502 Bad Gateway</body></html>", false, true},
+		{"504", 504, "text/plain", "gateway timeout", false, true},
+		{"503 starting no header", 503, "application/json", `{"error":"starting"}`, false, true},
+		{"500 json", 500, "application/json", `{"error":"internal"}`, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.ctype)
+				w.WriteHeader(tc.status)
+				fmt.Fprint(w, tc.body)
+			}))
+			defer srv.Close()
+			_, err := litesource.New(srv.URL, nil).Probe(context.Background())
+			if err == nil {
+				t.Fatal("no error")
+			}
+			if got := errors.Is(err, litesource.ErrNotOpenccuLite); got != tc.notLite {
+				t.Fatalf("ErrNotOpenccuLite %v, want %v: %v", got, tc.notLite, err)
+			}
+			var nr *litesource.NotReadyError
+			if got := errors.As(err, &nr); got != tc.ready {
+				t.Fatalf("NotReadyError %v, want %v: %v", got, tc.ready, err)
+			}
+		})
+	}
+
+	down := httptest.NewServer(http.NotFoundHandler())
+	url := down.URL
+	down.Close()
+	_, err = litesource.New(url, nil).Probe(context.Background())
+	if err == nil || errors.Is(err, litesource.ErrNotOpenccuLite) || errors.As(err, &nr) {
+		t.Fatalf("an unreachable system is any other error: %v", err)
+	}
+}
+
+// TestAwait: the wait outlives the boot-time 503s (and, on openccu-lite, a 404 of the web server)
+// and ends on a CCU's 404 elsewhere; the log says the reason once, not once per probe.
+func TestAwait(t *testing.T) {
+	old := litesource.ProbeRetry
+	litesource.ProbeRetry = 10 * time.Millisecond
+	defer func() { litesource.ProbeRetry = old }()
+
+	s := fakelite.New()
+	defer s.Close()
+	s.StartingRetryAfter = 0 // Retry-After would hold every probe for whole seconds
+	s.SetStarting(4)
+	var lines []string
+	c := litesource.New(s.URL, addonkit.StaticToken("olt_test"))
+	c.Log = func(f string, a ...any) { lines = append(lines, fmt.Sprintf(f, a...)) }
+	v, err := c.Await(context.Background(), false)
+	if err != nil || v.API != "meta" {
+		t.Fatalf("await: %v %+v", err, v)
+	}
+	if s.StartingSeen != 4 {
+		t.Fatalf("%d probes answered starting, want 4", s.StartingSeen)
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "waiting for the system: the system is not ready yet (http 503 starting)") {
+		t.Fatalf("one log line for the same reason: %q", lines)
+	}
+
+	// Retry-After is honoured: one 503 with Retry-After: 1 holds the next probe for a second
+	s.StartingRetryAfter = 1
+	s.SetStarting(1)
+	start := time.Now()
+	if _, err := c.Await(context.Background(), false); err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d < time.Second || d > 3*time.Second {
+		t.Fatalf("Retry-After: 1 waited %v", d)
+	}
+
+	// a CCU: the wait ends with ErrNotOpenccuLite ...
+	ccu := httptest.NewServer(http.NotFoundHandler())
+	defer ccu.Close()
+	if _, err := litesource.New(ccu.URL, nil).Await(context.Background(), false); !errors.Is(err, litesource.ErrNotOpenccuLite) {
+		t.Fatalf("a CCU ends the wait: %v", err)
+	}
+	// ... unless the platform rule says openccu-lite: then a 404 is a hiccup and the wait goes on
+	var mu sync.Mutex
+	serve := false
+	flaky := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		ok := serve
+		mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"api":"meta","version":1}`)
+	}))
+	defer flaky.Close()
+	lines = nil
+	fc := litesource.New(flaky.URL, nil)
+	fc.Log = c.Log
+	time.AfterFunc(50*time.Millisecond, func() { mu.Lock(); serve = true; mu.Unlock() })
+	if v, err := fc.Await(context.Background(), true); err != nil || v.API != "meta" {
+		t.Fatalf("on openccu-lite the wait outlives a 404: %v %+v", err, v)
+	}
+	if len(lines) != 1 || !strings.Contains(lines[0], "not openccu-lite?") {
+		t.Fatalf("log: %q", lines)
+	}
+
+	// the context ends the wait
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+	defer cancel()
+	if _, err := litesource.New(ccu.URL, nil).Await(ctx, true); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("context: %v", err)
+	}
 }
