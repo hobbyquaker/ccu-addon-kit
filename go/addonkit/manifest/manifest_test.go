@@ -43,23 +43,27 @@ func TestParseGood(t *testing.T) {
 
 func TestValidateRefusals(t *testing.T) {
 	cases := map[string]string{
-		"format":       `{"format": 2, "id": "x", "name": "X"}`,
-		"id":           `{"format": 1, "id": "Bad Id", "name": "X"}`,
-		"name":         `{"format": 1, "id": "x", "name": " "}`,
-		"unknown key":  `{"format": 1, "id": "x", "name": "X", "colour": "red"}`,
-		"scope":        `{"format": 1, "id": "x", "name": "X", "runtime": {"api_scopes": ["*"]}}`,
-		"capability":   `{"format": 1, "id": "x", "name": "X", "runtime": {"capabilities": ["CAP_NET_ADMIN"]}}`,
-		"group":        `{"format": 1, "id": "x", "name": "X", "runtime": {"groups": ["occulite"]}}`,
-		"data_dir":     `{"format": 1, "id": "x", "name": "X", "runtime": {"data_dirs": ["/usr/local/addons/y"]}}`,
-		"data_dir top": `{"format": 1, "id": "x", "name": "X", "runtime": {"data_dirs": ["/usr/local/"]}}`,
-		"needs":        `{"format": 1, "id": "x", "name": "X", "runtime": {"needs": ["rega"]}}`,
-		"start":        `{"format": 1, "id": "x", "name": "X", "runtime": {"start": "late"}}`,
-		"port":         `{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [0]}}`,
-		"icon":         `{"format": 1, "id": "x", "name": "X", "ui": {"icon": "/etc/passwd"}}`,
-		"release":      `{"format": 1, "id": "x", "name": "X", "release": {"github": "nope"}}`,
-		"asset":        `{"format": 1, "id": "x", "name": "X", "release": {"github": "a/b", "asset": "x.tar.gz"}}`,
-		"changelog":    `{"format": 1, "id": "x", "name": "X", "changelog": "javascript:alert(1)"}`,
-		"arch":         `{"format": 1, "id": "x", "name": "X", "requires": {"architectures": ["mips"]}}`,
+		"format":        `{"format": 2, "id": "x", "name": "X"}`,
+		"id":            `{"format": 1, "id": "Bad Id", "name": "X"}`,
+		"name":          `{"format": 1, "id": "x", "name": " "}`,
+		"unknown key":   `{"format": 1, "id": "x", "name": "X", "colour": "red"}`,
+		"scope":         `{"format": 1, "id": "x", "name": "X", "runtime": {"api_scopes": ["*"]}}`,
+		"capability":    `{"format": 1, "id": "x", "name": "X", "runtime": {"capabilities": ["CAP_NET_ADMIN"]}}`,
+		"group":         `{"format": 1, "id": "x", "name": "X", "runtime": {"groups": ["occulite"]}}`,
+		"data_dir":      `{"format": 1, "id": "x", "name": "X", "runtime": {"data_dirs": ["/usr/local/addons/y"]}}`,
+		"data_dir top":  `{"format": 1, "id": "x", "name": "X", "runtime": {"data_dirs": ["/usr/local/"]}}`,
+		"needs":         `{"format": 1, "id": "x", "name": "X", "runtime": {"needs": ["rega"]}}`,
+		"start":         `{"format": 1, "id": "x", "name": "X", "runtime": {"start": "late"}}`,
+		"port":          `{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [0]}}`,
+		"port_info":     `{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161], "port_info": {"162": {"proto": "udp"}}}}`,
+		"port_info key": `{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161], "port_info": {"snmp": {}}}}`,
+		"proto":         `{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161], "port_info": {"161": {"proto": "sctp"}}}}`,
+		"protocol key":  `{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161], "port_info": {"161": {"protocol": "udp"}}}}`,
+		"icon":          `{"format": 1, "id": "x", "name": "X", "ui": {"icon": "/etc/passwd"}}`,
+		"release":       `{"format": 1, "id": "x", "name": "X", "release": {"github": "nope"}}`,
+		"asset":         `{"format": 1, "id": "x", "name": "X", "release": {"github": "a/b", "asset": "x.tar.gz"}}`,
+		"changelog":     `{"format": 1, "id": "x", "name": "X", "changelog": "javascript:alert(1)"}`,
+		"arch":          `{"format": 1, "id": "x", "name": "X", "requires": {"architectures": ["mips"]}}`,
 	}
 	for name, src := range cases {
 		if _, err := Parse([]byte(src)); err == nil {
@@ -156,5 +160,40 @@ func TestWebIngress(t *testing.T) {
 	// a manifest without it: nil
 	if m, _ := Parse([]byte(good)); m.Runtime.WebIngress != nil {
 		t.Fatal("web_ingress set without a declaration")
+	}
+}
+
+// runtime.port_info as occulited's manifest has it: keyed by a declared port, proto tcp or udp.
+func TestPortInfo(t *testing.T) {
+	src := `{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161, 8443], "port_info": {
+	  "161": {"proto": "udp", "label": {"de": "SNMP-Agent", "en": "SNMP agent"}},
+	  "8443": {"proto": "tcp", "tls": true}}}}`
+	m, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pi := m.Runtime.PortInfo["161"]; pi.Proto != "udp" || pi.Label["en"] != "SNMP agent" {
+		t.Fatalf("%+v", pi)
+	}
+	if pi := m.Runtime.PortInfo["8443"]; pi.Proto != "tcp" || !pi.TLS {
+		t.Fatalf("%+v", pi)
+	}
+	out, _ := json.Marshal(m)
+	if !strings.Contains(string(out), `"161":{"proto":"udp"`) {
+		t.Fatalf("proto must survive: %s", out)
+	}
+	for _, c := range []struct{ src, want string }{
+		{`{"162": {"proto": "udp"}}`, `runtime.port_info "162" names no declared port`},
+		{`{"snmp": {}}`, `runtime.port_info "snmp" names no declared port`},
+		{`{"161": {"proto": "UDP"}}`, `proto must be "tcp" or "udp", got "UDP"`},
+	} {
+		_, err := Parse([]byte(`{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161], "port_info": ` + c.src + `}}`))
+		if err == nil || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: got %v, want %q", c.src, err, c.want)
+		}
+	}
+	// no proto is fine: it is informational
+	if _, err := Parse([]byte(`{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161], "port_info": {"161": {"tls": true}}}}`)); err != nil {
+		t.Error(err)
 	}
 }

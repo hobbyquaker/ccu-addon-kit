@@ -12,6 +12,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -165,9 +166,10 @@ var deniedIngress = []netip.Prefix{
 
 // PortInfo describes one declared port.
 type PortInfo struct {
-	Protocol string `json:"protocol,omitempty"`
-	TLS      bool   `json:"tls,omitempty"`
-	Label    Text   `json:"label,omitempty"`
+	// Proto is "tcp" or "udp", informational: the firewall opens both.
+	Proto string `json:"proto,omitempty"`
+	TLS   bool   `json:"tls,omitempty"`
+	Label Text   `json:"label,omitempty"`
 }
 
 // MarshalJSON keeps `needs: []` in the output (an absent key means "after rfd and HMIPServer",
@@ -286,6 +288,14 @@ func (m *Manifest) Validate() error {
 				fail("runtime.ports: %d out of range", p)
 			}
 		}
+		for k, pi := range r.PortInfo {
+			if n, err := strconv.Atoi(k); err != nil || !containsInt(r.Ports, n) {
+				fail("runtime.port_info %q names no declared port", k)
+			}
+			if pi.Proto != "" && pi.Proto != "tcp" && pi.Proto != "udp" {
+				fail("runtime.port_info %q: proto must be \"tcp\" or \"udp\", got %q", k, pi.Proto)
+			}
+		}
 		for _, s := range r.APIScopes {
 			if !contains(Scopes, s) {
 				fail("runtime.api_scopes: %q is never granted", s)
@@ -349,6 +359,15 @@ func (m *Manifest) Undeclared() bool {
 func contains(list []string, s string) bool {
 	for _, x := range list {
 		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func containsInt(list []int, n int) bool {
+	for _, x := range list {
+		if x == n {
 			return true
 		}
 	}
