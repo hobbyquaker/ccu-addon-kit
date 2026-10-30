@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path"
 	"regexp"
@@ -101,6 +102,65 @@ type Runtime struct {
 	Daemon       bool                `json:"daemon,omitempty"`
 	APIScopes    []string            `json:"api_scopes,omitempty"`
 	Note         Text                `json:"note,omitempty"`
+	// WebIngress: the addon brings connections from outside into the web server (a VPN or tunnel
+	// addon that ends the tunnel in its own process). The system gives it lighttpd's PROXY-protocol
+	// Unix socket /run/lighttpd-addons/<id>/proxy.sock (www-data:addon-<id>, 0750) and accepts the
+	// client address the addon claims only inside Ranges.
+	WebIngress *WebIngress `json:"web_ingress,omitempty"`
+}
+
+// WebIngress is an addon's declaration of a web ingress.
+type WebIngress struct {
+	// Ranges are the address ranges (CIDR, IPv4 or IPv6) the addon's clients have: what it may
+	// claim as a request's address. Never the loopback, never everything.
+	Ranges []string `json:"ranges"`
+}
+
+// Prefixes parses the ingress ranges with the system's rules: 1 to 8 ranges, each a canonical
+// CIDR range (the network address), no wider than /8 (IPv4) or /32 (IPv6), an IPv4 range written
+// as IPv4, and none that holds the loopback, the unspecified address, link-local or multicast
+// addresses. A nil ingress has no prefixes and no error.
+func (w *WebIngress) Prefixes() ([]netip.Prefix, error) {
+	if w == nil {
+		return nil, nil
+	}
+	if len(w.Ranges) == 0 || len(w.Ranges) > 8 {
+		return nil, errors.New("runtime.web_ingress.ranges: 1 to 8 ranges")
+	}
+	out := make([]netip.Prefix, 0, len(w.Ranges))
+	for _, s := range w.Ranges {
+		p, err := netip.ParsePrefix(s)
+		if err != nil {
+			return nil, fmt.Errorf("runtime.web_ingress.ranges %q is not a CIDR range", s)
+		}
+		if p.Masked() != p {
+			return nil, fmt.Errorf("runtime.web_ingress.ranges %q is not a network address (use %s)", s, p.Masked())
+		}
+		a := p.Addr()
+		if a.Is4() && p.Bits() < 8 || a.Is6() && p.Bits() < 32 {
+			return nil, fmt.Errorf("runtime.web_ingress.ranges %q is too wide", s)
+		}
+		if a.Is4In6() {
+			return nil, fmt.Errorf("runtime.web_ingress.ranges %q: write an IPv4 range as IPv4", s)
+		}
+		for _, bad := range deniedIngress {
+			if bad.Overlaps(p) {
+				return nil, fmt.Errorf("runtime.web_ingress.ranges %q overlaps %s, which an ingress may never claim", s, bad)
+			}
+		}
+		out = append(out, p)
+	}
+	return out, nil
+}
+
+// deniedIngress are the ranges no web ingress may hand out as a client's address: the loopback
+// (the system trusts it), the unspecified address, link-local and multicast, and IPv4-mapped IPv6.
+var deniedIngress = []netip.Prefix{
+	netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("169.254.0.0/16"), netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("224.0.0.0/4"), netip.MustParsePrefix("ff00::/8"),
+	netip.MustParsePrefix("::ffff:0:0/96"),
 }
 
 // PortInfo describes one declared port.
@@ -253,6 +313,9 @@ func (m *Manifest) Validate() error {
 				fail("runtime.paths: %q is not a clean absolute path", p)
 			}
 		}
+		if _, err := r.WebIngress.Prefixes(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -273,14 +336,14 @@ func checkDataDir(d, id string) error {
 }
 
 // Undeclared says whether the system would show the addon as "undeclared": no runtime block, or
-// one that says only the start order (needs, start, note).
+// one that says only the start order (needs, start, note). A web ingress is a declaration.
 func (m *Manifest) Undeclared() bool {
 	r := m.Runtime
 	if r == nil {
 		return true
 	}
 	return !r.Root && len(r.Capabilities) == 0 && len(r.Groups) == 0 && len(r.DataDirs) == 0 && len(r.Paths) == 0 &&
-		len(r.Ports) == 0 && !r.Daemon && len(r.APIScopes) == 0
+		len(r.Ports) == 0 && !r.Daemon && len(r.APIScopes) == 0 && r.WebIngress == nil
 }
 
 func contains(list []string, s string) bool {

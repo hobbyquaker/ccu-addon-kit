@@ -21,7 +21,7 @@ go get github.com/hobbyquaker/ccu-addon-kit/go@main
 | `Prefs(r)` | theme and language from `?theme=&lang=` and the `ol-theme`/`ol-lang` cookies, for server-rendered bits |
 | `Listen(port, socket)` | the loopback only, or a unix socket in the addon's tree (nothing but lighttpd faces the LAN) |
 | `StatusJSON`, `ExitCode` | the service convention's status line for a daemon that answers `status` itself |
-| `addonkit/manifest` | the `openccu-lite.json` subset a Go addon declares, with the validator the addon's tests run (the install-time rules: scopes never granted, root capabilities and groups refused for a confined addon, `data_dirs` guard rails) and `Undeclared()` |
+| `addonkit/manifest` | the `openccu-lite.json` subset a Go addon declares, with the validator the addon's tests run (the install-time rules: scopes never granted, root capabilities and groups refused for a confined addon, `data_dirs` guard rails, the ranges of a `web_ingress` as the system checks them) and `Undeclared()` |
 | `addonkit/fragment` | renders `etc/lighttpd.conf`: the redirect of the bare path and the proxy of `/addons/<id>/` (or a sub-path) to the loopback port or socket, the 503 page - the same text as the CLI's `vendor` from kit.json's `proxied` (shared fixtures in `testdata/`); the frame and the CGIs live in their own `/addons/<www>/`, within the directives occulited accepts |
 
 ## `litesource`
