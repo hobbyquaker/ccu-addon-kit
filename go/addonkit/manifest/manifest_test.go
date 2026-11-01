@@ -48,6 +48,7 @@ func TestValidateRefusals(t *testing.T) {
 		"name":          `{"format": 1, "id": "x", "name": " "}`,
 		"unknown key":   `{"format": 1, "id": "x", "name": "X", "colour": "red"}`,
 		"scope":         `{"format": 1, "id": "x", "name": "X", "runtime": {"api_scopes": ["*"]}}`,
+		"scope power":   `{"format": 1, "id": "x", "name": "X", "runtime": {"api_scopes": ["power"]}}`,
 		"capability":    `{"format": 1, "id": "x", "name": "X", "runtime": {"capabilities": ["CAP_NET_ADMIN"]}}`,
 		"group":         `{"format": 1, "id": "x", "name": "X", "runtime": {"groups": ["occulite"]}}`,
 		"data_dir":      `{"format": 1, "id": "x", "name": "X", "runtime": {"data_dirs": ["/usr/local/addons/y"]}}`,
@@ -194,6 +195,14 @@ func TestPortInfo(t *testing.T) {
 	}
 	// no proto is fine: it is informational
 	if _, err := Parse([]byte(`{"format": 1, "id": "x", "name": "X", "runtime": {"ports": [161], "port_info": {"161": {"tls": true}}}}`)); err != nil {
+		t.Error(err)
+	}
+}
+
+// The scope that powers the system off and nothing else (a UPS addon); a reboot stays with power,
+// which an addon never gets.
+func TestScopePowerHalt(t *testing.T) {
+	if _, err := Parse([]byte(`{"format": 1, "id": "x", "name": "X", "runtime": {"daemon": true, "needs": [], "api_scopes": ["power:halt"]}}`)); err != nil {
 		t.Error(err)
 	}
 }

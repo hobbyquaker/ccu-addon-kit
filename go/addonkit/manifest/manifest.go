@@ -213,7 +213,7 @@ var urlShape = regexp.MustCompile(`^https?://[^\s"'<>]+$`)
 
 // Scopes an addon may declare for its own token; the system drops anything else at the mint.
 var Scopes = []string{"meta:read", "meta:write", "system:read", "logs:read", "system:write", "addons:write", "led",
-	"rpc:read", "rpc:operate", "rpc:configure", "rpc:admin"}
+	"power:halt", "rpc:read", "rpc:operate", "rpc:configure", "rpc:admin"}
 
 // RootCapabilities are refused for a confined addon (ch. 11): root in effect.
 var RootCapabilities = []string{"CAP_SYS_ADMIN", "CAP_SYS_MODULE", "CAP_SYS_RAWIO", "CAP_SYS_PTRACE", "CAP_SYS_CHROOT",
