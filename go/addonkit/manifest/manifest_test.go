@@ -206,3 +206,97 @@ func TestScopePowerHalt(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestBackupBlock(t *testing.T) {
+	ok := map[string]string{
+		"hook":         `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/backup-snapshot", "staging": "var/backup", "timeout": 120, "size_hint_mb": 50, "restore": "bin/backup-restore"}}`,
+		"hook minimal": `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup"}}`,
+		"targets":      `{"format": 1, "id": "sync", "name": "Sync", "backup": {"targets": {"protocol": 1, "label": {"de": "Cloud-Speicher", "en": "Cloud storage"}, "setup": "/addon-settings/sync#accounts"}}}`,
+		"both":         `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup", "targets": {"protocol": 1, "label": "Bucket", "setup": "/addons/x/"}}}`,
+		"timeout max":  `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup", "timeout": 1800}}`,
+	}
+	for name, src := range ok {
+		if _, err := Parse([]byte(src)); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	bad := map[string]string{
+		"empty":            `{"format": 1, "id": "x", "name": "X", "backup": {}}`,
+		"no staging":       `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap"}}`,
+		"no hook":          `{"format": 1, "id": "x", "name": "X", "backup": {"staging": "backup"}}`,
+		"absolute":         `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "/bin/snap", "staging": "backup"}}`,
+		"dotdot":           `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/../snap", "staging": "backup"}}`,
+		"dot segment":      `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/./snap", "staging": "backup"}}`,
+		"trailing slash":   `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup/"}}`,
+		"space":            `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/my snap", "staging": "backup"}}`,
+		"hook in staging":  `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "var/backup/snap", "staging": "var/backup"}}`,
+		"hook is staging":  `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "var", "staging": "var"}}`,
+		"restore in stage": `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "var", "restore": "var/restore"}}`,
+		"timeout low":      `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup", "timeout": 5}}`,
+		"timeout high":     `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup", "timeout": 1801}}`,
+		"size negative":    `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup", "size_hint_mb": -1}}`,
+		"unknown key":      `{"format": 1, "id": "x", "name": "X", "backup": {"hook": "bin/snap", "staging": "backup", "paths": ["/x"]}}`,
+		"targets+timeout":  `{"format": 1, "id": "x", "name": "X", "backup": {"timeout": 60, "targets": {"protocol": 1, "label": "B", "setup": "/addons/x/"}}}`,
+		"protocol":         `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 2, "label": "B", "setup": "/addons/x/"}}}`,
+		"label empty":      `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": {"en": " "}, "setup": "/addons/x/"}}}`,
+		"label long":       `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": "` + strings.Repeat("x", 41) + `", "setup": "/addons/x/"}}}`,
+		"label newline":    `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": "a\nb", "setup": "/addons/x/"}}}`,
+		"setup site":       `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": "B", "setup": "https://example.com/"}}}`,
+		"setup elsewhere":  `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": "B", "setup": "/system/backup"}}}`,
+		"setup dotdot":     `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": "B", "setup": "/addons/../system"}}}`,
+		"setup double":     `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": "B", "setup": "/addons//x"}}}`,
+		"targets unknown":  `{"format": 1, "id": "x", "name": "X", "backup": {"targets": {"protocol": 1, "label": "B", "setup": "/addons/x/", "url": "x"}}}`,
+	}
+	for name, src := range bad {
+		if _, err := Parse([]byte(src)); err == nil {
+			t.Errorf("%s: accepted %s", name, src)
+		}
+	}
+	m, err := Parse([]byte(`{"format": 1, "id": "h", "name": "H", "backup": {"hook": "bin/snap", "staging": "backup", "size_hint_mb": 101}}`))
+	if err != nil || !m.Backup.Large() {
+		t.Fatalf("101 MB is large: %v", err)
+	}
+	if (&Backup{SizeHintMB: 100}).Large() || (*Backup)(nil).Large() {
+		t.Fatal("100 MB and no block are not large")
+	}
+}
+
+func TestRuntimeBinAndTimers(t *testing.T) {
+	src := `{"format": 1, "id": "sync", "name": "Sync", "runtime": {"needs": [], "bin": "bin",
+		"timers": {"exec": "lite-sync", "args": ["run"]}, "read_addon_data": true, "api_scopes": ["system:read", "timers:addon"]}}`
+	m, err := Parse([]byte(src))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Runtime.Bin != "bin" || m.Runtime.Timers.Exec != "lite-sync" || !m.Runtime.ReadAddonData {
+		t.Fatalf("%+v", m.Runtime)
+	}
+	for _, src := range []string{
+		`{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "bin"}}`,
+		`{"format": 1, "id": "x", "name": "X", "runtime": {"read_addon_data": true}}`,
+	} {
+		m, err := Parse([]byte(src))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.Undeclared() {
+			t.Errorf("%s is a declaration", src)
+		}
+	}
+	bad := map[string]string{
+		"bin absolute":  `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "/usr/bin"}}`,
+		"bin dotdot":    `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "../bin"}}`,
+		"bin trailing":  `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "bin/"}}`,
+		"timers no bin": `{"format": 1, "id": "x", "name": "X", "runtime": {"timers": {"exec": "run"}}}`,
+		"timers slash":  `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "bin", "timers": {"exec": "sub/run"}}}`,
+		"timers dot":    `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "bin", "timers": {"exec": ".."}}}`,
+		"timers args":   `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "bin", "timers": {"exec": "run", "args": ["a", "b", "c", "d", "e"]}}}`,
+		"timers arg":    `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "bin", "timers": {"exec": "run", "args": ["$HOME"]}}}`,
+		"timers space":  `{"format": 1, "id": "x", "name": "X", "runtime": {"bin": "bin", "timers": {"exec": "run", "args": ["a b"]}}}`,
+	}
+	for name, src := range bad {
+		if _, err := Parse([]byte(src)); err == nil {
+			t.Errorf("%s: accepted %s", name, src)
+		}
+	}
+}
