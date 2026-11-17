@@ -87,6 +87,26 @@ background starts; the convention fixes the commands' behaviour, not how the scr
 [`classic/sh/rc-helpers.sh`](../classic/sh/rc-helpers.sh) has optional helpers for a process
 tree: `Descendants <pid>`, `RssTreeKb <pid>`, `PidsJson <pid>`, and `JsonStr`.
 
+## Backup
+
+An addon whose data is a SQLite database (or lives outside `/usr/local`, on a USB stick) takes part
+in the system backup with two programs and two optional rc.d verbs. On openccu-lite from
+`1.3.0-beta.0` the manifest's `backup` block names the programs (occulited's
+`docs/manifest-format.md`, "backup"); a CCU3, OpenCCU and an older openccu-lite run neither, and
+the addon covers them itself.
+
+| | What it does |
+| --- | --- |
+| `bin/backup-snapshot` (the manifest's `hook`) | writes a consistent copy of the database into the staging (`VACUUM INTO`, `PRAGMA integrity_check` on the copy) and exits 0. Runs while the daemon runs, as the addon's user in its confinement. On success it tags the live database's directory in the tree `.nobackup` (the snapshot covers it); on a failure it removes that tag and exits non-zero, so the backup takes the live file as it lies |
+| `bin/backup-restore` (the manifest's `restore`) | before every start: a snapshot a restore brought back into the staging goes to the database's place unless the file there is newer (a stick that is gone: the default location in the tree, with a notice); then the staging is emptied. Nothing in the staging: nothing to do |
+| `rc.d backup-prepare`, `rc.d backup-restore` | the same two, for a call by hand or from a script; exit 0 or 1, one line of output |
+| the daemon, where nothing runs the hook | writes the snapshot itself when the staging holds none of its own or one older than a day, and keeps it there, so the firmware's own backup carries a copy at most a day old |
+
+The programs are small wrappers that call the daemon's binary (`exec bin/<daemon> -addon-dir … backup-snapshot`).
+Keep the staging out of every directory tagged `.nobackup` and the programs out of the staging (the
+system empties it after every backup's tar). In Go, `addonkit/backup` does all of it
+([go/README.md](../go/README.md)).
+
 ## The conformance test
 
 ```sh

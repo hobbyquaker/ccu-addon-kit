@@ -56,18 +56,32 @@ func (d Detector) Platform() Kind {
 }
 
 func (d Detector) liteVersion() bool {
+	_, ok := d.liteLine()
+	return ok
+}
+
+// LiteVersion is the value of /VERSION's LITE= line ("2.0.0-beta.7"), empty when there is none.
+func LiteVersion() string { return DefaultDetector.LiteVersion() }
+
+// LiteVersion is the value of the LITE= line in this detector's version file.
+func (d Detector) LiteVersion() string {
+	v, _ := d.liteLine()
+	return v
+}
+
+func (d Detector) liteLine() (string, bool) {
 	f, err := os.Open(d.VersionFile)
 	if err != nil {
-		return false
+		return "", false
 	}
 	defer f.Close()
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		if strings.HasPrefix(sc.Text(), "LITE=") {
-			return true
+		if v, ok := strings.CutPrefix(sc.Text(), "LITE="); ok {
+			return strings.TrimSpace(v), true
 		}
 	}
-	return false
+	return "", false
 }
 
 func (d Detector) executable(path string) bool {
