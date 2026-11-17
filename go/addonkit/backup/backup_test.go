@@ -12,8 +12,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/hobbyquaker/ccu-addon-kit/go/addonkit"
 )
 
 // fakeDriver stands in for SQLite: VACUUM INTO writes the "database" content to the target file,
@@ -114,7 +112,7 @@ func TestWrite(t *testing.T) {
 	s, _ := setup(t)
 	d := &fakeDriver{content: "v1", integrity: "ok"}
 	db := open(t, d)
-	if err := s.Write(context.Background(), db); err != nil {
+	if err := s.Write(context.Background(), db, ByAddon); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(s.Path()); string(b) != "v1" {
@@ -123,8 +121,8 @@ func TestWrite(t *testing.T) {
 	if !s.Tagged() {
 		t.Fatal("a written snapshot tags the data directory")
 	}
-	if _, ok := s.Age(); !ok {
-		t.Fatal("the snapshot is this system's own")
+	if age, by, ok := s.Own(); !ok || by != ByAddon || age > time.Minute {
+		t.Fatalf("the snapshot is this system's own: %v %v %v", age, by, ok)
 	}
 	if _, err := os.Stat(s.Path() + ".tmp"); err == nil {
 		t.Fatal("the temporary file is gone")
@@ -136,7 +134,7 @@ func TestWrite(t *testing.T) {
 	// a second snapshot replaces the first (VACUUM INTO refuses an existing target: the
 	// temporary file is new each time)
 	d.content = "v2"
-	if err := s.Write(context.Background(), db); err != nil {
+	if err := s.Write(context.Background(), db, ByAddon); err != nil {
 		t.Fatal(err)
 	}
 	if b, _ := os.ReadFile(s.Path()); string(b) != "v2" {
@@ -145,7 +143,7 @@ func TestWrite(t *testing.T) {
 	// a leftover temporary file of a killed run does not stop the next
 	os.WriteFile(s.Path()+".tmp", []byte("torn"), 0o600)
 	d.content = "v3"
-	if err := s.Write(context.Background(), db); err != nil {
+	if err := s.Write(context.Background(), db, ByAddon); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -160,7 +158,7 @@ func TestWriteFailures(t *testing.T) {
 			os.MkdirAll(s.Staging, 0o750)
 			os.WriteFile(s.Path(), []byte("old"), 0o600)
 			s.Tag()
-			if err := s.Write(context.Background(), open(t, d)); err == nil {
+			if err := s.Write(context.Background(), open(t, d), ByAddon); err == nil {
 				t.Fatal("no error")
 			}
 			if b, _ := os.ReadFile(s.Path()); string(b) != "old" {
@@ -174,7 +172,7 @@ func TestWriteFailures(t *testing.T) {
 			}
 		})
 	}
-	if err := (SQLite{}).Write(context.Background(), nil); err == nil {
+	if err := (SQLite{}).Write(context.Background(), nil, ByAddon); err == nil {
 		t.Fatal("an empty SQLite is refused")
 	}
 }
@@ -190,11 +188,14 @@ func TestRestore(t *testing.T) {
 	t.Run("own", func(t *testing.T) {
 		s, dir := setup(t)
 		live := filepath.Join(dir, "var", "x.db")
-		if err := s.Write(ctx, open(t, &fakeDriver{content: "snap", integrity: "ok"})); err != nil {
+		if err := s.Write(ctx, open(t, &fakeDriver{content: "snap", integrity: "ok"}), ByHook); err != nil {
 			t.Fatal(err)
 		}
 		os.Remove(live)
-		if r, err := s.Restore(live); r != Own || err != nil {
+		if _, by, ok := s.Own(); !ok || by != ByHook {
+			t.Fatal("own, by the hook")
+		}
+		if r, err := s.Restore(live); r != Mine || err != nil {
 			t.Fatal(r, err)
 		}
 		if _, err := os.Stat(s.Path()); err != nil {
@@ -205,6 +206,9 @@ func TestRestore(t *testing.T) {
 		s, dir := setup(t)
 		live := filepath.Join(dir, "stick", "folder", "x.db")
 		restored(t, s, "snap", time.Now())
+		if _, _, ok := s.Own(); ok {
+			t.Fatal("a restored snapshot is not this system's own")
+		}
 		if r, err := s.Restore(live); r != Restored || err != nil {
 			t.Fatal(r, err)
 		}
@@ -289,60 +293,27 @@ func TestTag(t *testing.T) {
 	}
 }
 
-func TestRunsHook(t *testing.T) {
-	dir := t.TempDir()
-	d := addonkit.Detector{VersionFile: filepath.Join(dir, "VERSION"), Occulited: filepath.Join(dir, "occulited"), CCU3Hook: filepath.Join(dir, "S00")}
-	cases := map[string]bool{
-		"VERSION=3.89.8\nPRODUCT=ccu3\n":                         false, // OpenCCU (and a CCU3)
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.2.2\n":            false,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.0.0-dev.28\n":     false,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0-beta.0\n":     true,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0\n":            true,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=2.0.0-beta.6\n":     true,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=2.0.0\n":            true,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=something-else\n":   true, // unknown: newer
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0-alpha.1\n":    false,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.2.99+build.7\n":   false,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0-beta.0.1\n":   true,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0-beta\n":       false,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0-rc.0\n":       true,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0-beta.10\n":    true,
-		"VERSION=3.89.11\nVARIANT=lite\nLITE=1.3.0-beta.0+abc\n": true,
+func TestSystemRunsHook(t *testing.T) {
+	s, _ := setup(t)
+	t.Setenv("INVOCATION_ID", "")
+	if err := s.MarkRestoreRun(); err != nil {
+		t.Fatal(err)
 	}
-	for v, want := range cases {
-		os.WriteFile(d.VersionFile, []byte(v), 0o644)
-		if got := RunsHook(d); got != want {
-			t.Errorf("%q: %v, want %v", v, got, want)
-		}
+	if s.SystemRunsHook() {
+		t.Fatal("outside systemd: no")
 	}
-	// an executable occulited without a LITE= line: openccu-lite of an unknown version
-	os.WriteFile(d.VersionFile, []byte("VERSION=3.89.11\n"), 0o644)
-	os.WriteFile(d.Occulited, nil, 0o755)
-	if !RunsHook(d) {
-		t.Error("occulited without a version")
+	t.Setenv("INVOCATION_ID", "aaaa")
+	if s.SystemRunsHook() {
+		t.Fatal("no mark: the restore program did not run")
 	}
-}
-
-func TestCompare(t *testing.T) {
-	for _, c := range []struct {
-		a, b string
-		want int
-		ok   bool
-	}{
-		{"1.0.0", "1.0.0", 0, true},
-		{"1.0.0-alpha", "1.0.0-alpha.1", -1, true},
-		{"1.0.0-alpha.1", "1.0.0-alpha.beta", -1, true},
-		{"1.0.0-alpha.beta", "1.0.0-beta", -1, true},
-		{"1.0.0-beta.2", "1.0.0-beta.11", -1, true},
-		{"1.0.0-rc.1", "1.0.0", -1, true},
-		{"2.0.0", "1.9.9", 1, true},
-		{"1.0", "1.0.0", 0, false},
-		{"1.0.0-", "1.0.0", 0, false},
-		{"a.b.c", "1.0.0", 0, false},
-	} {
-		got, ok := compare(c.a, c.b)
-		if got != c.want || ok != c.ok {
-			t.Errorf("compare(%q, %q) = %d, %v", c.a, c.b, got, ok)
-		}
+	if err := s.MarkRestoreRun(); err != nil {
+		t.Fatal(err)
+	}
+	if !s.SystemRunsHook() {
+		t.Fatal("the restore program ran in this start")
+	}
+	t.Setenv("INVOCATION_ID", "bbbb")
+	if s.SystemRunsHook() {
+		t.Fatal("a mark of an earlier start does not count")
 	}
 }
