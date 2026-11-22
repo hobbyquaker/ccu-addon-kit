@@ -1,7 +1,8 @@
 #
 #   update_check.cgi - the Zusatzsoftware page's update check (MIT, docs/cgi-api.md; the CCU
 #   addon handbook, chapter 04). Plain text: ?cmd=check_version -> the newest version or n/a;
-#   ?cmd=download -> a redirect to the release page. Shares kit/version.cgi's cache. No
+#   ?cmd=download -> a redirect to the package for this system (kit.json's update.assetHint, by
+#   uname -m) or else to the release page. Shares kit/version.cgi's cache. No
 #   session: the WebUI's XMLHttpRequest and OpenCCU's checkAddonUpdates.sh send none.
 #
 source $KIT_HOME/lib/kit/release.tcl
@@ -14,6 +15,14 @@ kit_main {
     array set rel $r
     if {[string equal $cmd download]} {
         set url $rel(url)
+        # the asset for this system, when kit.json names its pattern and the release's tag is known
+        set arch [kit_package_arch]
+        if {![string equal $KIT(assetHint) ""] && ![string equal $arch ""] && ![string equal $rel(latest) ""]
+                && [regexp {^(https://github\.com/[^/]+/[^/]+)/releases/tag/([^/?#]+)$} $url all base tag]} {
+            regsub -all {\{arch\}} $KIT(assetHint) $arch asset
+            regsub -all {\{version\}} $asset $rel(latest) asset
+            set url $base/releases/download/$tag/$asset
+        }
         if {[string equal $url ""] && ![string equal $KIT(github) ""]} {
             set url https://github.com/$KIT(github)/releases/latest
         }

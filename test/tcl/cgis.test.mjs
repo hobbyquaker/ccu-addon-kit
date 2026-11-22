@@ -287,6 +287,35 @@ describe('kit/version.cgi and update_check.cgi', () => {
         assert.equal(after30.json.source, 'network', 'an error is cached for 30 min only');
     });
 
+    it('links the package for this system when update.assetHint names it', async () => {
+        const a = await setup({update: {github: 'owner/repo', assetHint: 'kitdemo-{arch}-{version}.tar.gz'}});
+        regaSessions(a);
+        a.write('curl-body', RELEASE);
+        a.write('curl-code', '200');
+        const cases = [
+            ['x86_64', 'x86_64'], ['amd64', 'x86_64'], ['aarch64', 'aarch64'], ['arm64', 'aarch64'],
+            ['armv7l', 'armv7l'], ['armv8l', 'armv7l'],
+        ];
+        for (const [machine, arch] of cases) {
+            const dl = await a.cgi('www/update_check.cgi', {query: {cmd: 'download'}, env: {KIT_MACHINE: machine}});
+            assert.equal(dl.status, 302, machine);
+            assert.equal(dl.headers.location, `https://github.com/owner/repo/releases/download/v0.5.0/kitdemo-${arch}-0.5.0.tar.gz`, machine);
+        }
+        // an architecture no package is named for, and a release whose tag is not known: the release page
+        const other = await a.cgi('www/update_check.cgi', {query: {cmd: 'download'}, env: {KIT_MACHINE: 'armv6l'}});
+        assert.equal(other.headers.location, 'https://github.com/owner/repo/releases/tag/v0.5.0');
+        writeFileSync(join(a.env.KIT_TMP, 'kit-kitdemo-release.json'),
+            JSON.stringify({latest: '0.5.0', url: '', checkedAt: Math.floor(Date.now() / 1000), error: ''}));
+        const noTag = await a.cgi('www/update_check.cgi', {query: {cmd: 'download'}, env: {KIT_MACHINE: 'x86_64'}});
+        assert.equal(noTag.headers.location, 'https://github.com/owner/repo/releases/latest');
+        await a.close();
+    });
+
+    it('links the release page without update.assetHint, whatever the system', async () => {
+        const dl = await t.cgi('www/update_check.cgi', {query: {cmd: 'download'}, env: {KIT_MACHINE: 'aarch64'}});
+        assert.equal(dl.headers.location, 'https://github.com/owner/repo/releases/tag/v0.5.0');
+    });
+
     it('answers not-configured without update.github', async () => {
         const n = await setup({update: undefined});
         regaSessions(n);

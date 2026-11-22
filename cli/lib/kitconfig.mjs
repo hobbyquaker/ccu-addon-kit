@@ -101,7 +101,9 @@ export function normalizeKit(raw) {
             if (typeof raw.update.github !== 'string' || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(raw.update.github)) {
                 e.push('"update.github" must be "owner/repo"');
             }
-            if (raw.update.assetHint !== undefined && typeof raw.update.assetHint !== 'string') { e.push('"update.assetHint" must be a string'); }
+            if (raw.update.assetHint !== undefined && (typeof raw.update.assetHint !== 'string' || !/^[A-Za-z0-9_.{}-]+$/.test(raw.update.assetHint))) {
+                e.push('"update.assetHint" must be a file name of [A-Za-z0-9_.-] with {arch} and {version}');
+            }
             update = {github: raw.update.github, ...(raw.update.assetHint ? {assetHint: raw.update.assetHint} : {})};
         }
     }
@@ -230,6 +232,7 @@ export function addonTcl(kit, kitVersion) {
             return tclList(kv);
         })))}`,
         `set KIT(github) ${tclWord(kit.update ? kit.update.github : '')}`,
+        `set KIT(assetHint) ${tclWord(kit.update && kit.update.assetHint ? kit.update.assetHint : '')}`,
         ...['read', 'service', 'log', 'write'].map((c) => `set KIT(perm,${c}) ${kit.permissions[c]}`),
         `set KIT(tabs) ${tclWord(tclList(kit.tabs))}`,
         `set KIT(www) ${tclWord(kit.www)}`,

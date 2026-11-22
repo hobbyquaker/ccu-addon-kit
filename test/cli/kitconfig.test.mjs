@@ -44,6 +44,14 @@ describe('kit.json', () => {
         }
     });
 
+    it('takes update.assetHint as a file name and hands it to the Tcl side', () => {
+        const k = normalizeKit({...MIN, update: {github: 'o/r', assetHint: 'b-{arch}-{version}.tar.gz'}});
+        assert.match(addonTcl(k, '0.1.0'), /^set KIT\(assetHint\) b-\\\{arch\\\}-\\\{version\\\}\.tar\.gz$/m);
+        assert.match(addonTcl(normalizeKit({...MIN, update: {github: 'o/r'}}), '0.1.0'), /^set KIT\(assetHint\) \{\}$/m);
+        assert.throws(() => normalizeKit({...MIN, update: {github: 'o/r', assetHint: '../x-{arch}.tgz'}}),
+            (e) => e instanceof KitConfigError && e.errors.some((m) => m.includes('update.assetHint')));
+    });
+
     it('lists every problem at once', () => {
         const bad = {schema: 2, id: 'Bad Id', name: {de: 'x'}, extra: 1, service: {commands: ['start', 'boot'], pollSeconds: 1},
             logs: [{id: 'a', file: 'relative.log'}, {id: 'a', syslogTag: 'x', file: '/x'}], permissions: {read: 'root', admin: 'any'},

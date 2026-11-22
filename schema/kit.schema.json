@@ -51,7 +51,7 @@
       "required": ["github"],
       "properties": {
         "github": {"type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"},
-        "assetHint": {"type": "string"}
+        "assetHint": {"type": "string", "pattern": "^[A-Za-z0-9_.{}-]+$", "description": "the release asset's file name with {arch} (uname -m: aarch64, x86_64, armv7l) and {version}; update_check.cgi?cmd=download then links the package for the system instead of the release page"}
       }
     },
     "permissions": {

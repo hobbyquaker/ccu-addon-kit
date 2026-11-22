@@ -39,7 +39,7 @@ catch {
 
 # defaults for what addon.tcl does not set
 foreach {k v} [list addonDir $KIT_HOME rc /usr/local/etc/config/rc.d/$KIT(id) \
-        versionFile $KIT_HOME/versions commands {start stop restart reload} logs {} github "" \
+        versionFile $KIT_HOME/versions commands {start stop restart reload} logs {} github "" assetHint "" \
         perm,read any perm,service any perm,log any perm,write any] {
     if {![info exists KIT($k)]} { set KIT($k) $v }
 }
@@ -246,7 +246,21 @@ proc kit_firmware {} {
 
 proc kit_arch {} {
     global tcl_platform
-    if {[info exists tcl_platform(machine)]} { return $tcl_platform(machine) }
+    set m ""
+    if {[info exists tcl_platform(machine)]} { set m $tcl_platform(machine) }
+    return [kit__testpath KIT_MACHINE $m]
+}
+
+# the package architecture for this system, as addon assets are named (uname -m): aarch64,
+# x86_64 or armv7l; "" for anything else. An armv8l (a 32-bit personality on a 64-bit ARM kernel,
+# piVCCU's container) runs the armv7l package.
+proc kit_package_arch {} {
+    set m [kit_arch]
+    switch -glob -- $m {
+        x86_64 - amd64 { return x86_64 }
+        aarch64 - arm64 { return aarch64 }
+        armv7* - armv8l { return armv7l }
+    }
     return ""
 }
 

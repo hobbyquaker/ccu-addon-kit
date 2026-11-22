@@ -73,6 +73,7 @@ describes it for editors, `vendor` checks it.
 | `service.pollSeconds` | no | 2–300, default 10 |
 | `logs` | no | the Log tab's sources: `file` (+ `rotated`) or `syslogTag`; default one syslog source tagged `<id>` |
 | `update.github` | no | `owner/repo` for the release check; without it only the version is shown |
+| `update.assetHint` | no | the release asset's file name with `{arch}` and `{version}`, e.g. `battery-{arch}-{version}.tar.gz`: `update_check.cgi?cmd=download` then links the package for the system (`uname -m` as `aarch64`, `x86_64` or `armv7l`; `armv8l` takes `armv7l`) instead of the release page |
 | `permissions` | no | who may do what, see [session.md](session.md#levels); default: any valid session may do everything |
 | `tabs` | yes | the order of the tabs; `kit:service`, `kit:log`, `kit:about` are the frame's; an addon tab id must be registered in the built frame |
 | `liteTabs` | no | the tabs shown **inside openccu-lite's shell**, a subset of `tabs` in order; default `tabs`. There the service and the log are the shell's own pages (the Addons page, the system log), so an addon may leave `kit:service` and `kit:log` out of this list |
@@ -200,7 +201,7 @@ On openccu-lite there is no `/var/log/messages`: a `syslog` source answers
 | `GET kit/version.cgi?cmd=check` | read | `{"ok":true,"installed","latest","newer","url","checkedAt","source":"network"\|"cache"}`; without a network `"latest":null,"error":"offline"`; also `rate-limited`, `no-release`, `http-<status>`, `not-configured` |
 | `POST kit/version.cgi` `cmd=check&force=1` | read + CSRF | the same, ignoring a cache older than 60 s |
 | `GET update_check.cgi?cmd=check_version` | none | plain text: the newest version, or `n/a` (the handbook's chapter 04 contract) |
-| `GET update_check.cgi?cmd=download` | none | a redirect to the release page |
+| `GET update_check.cgi?cmd=download` | none | a redirect to the package for this system (`update.assetHint`, the release's tag and `uname -m`), or to the release page without an `assetHint`, on another architecture, or when the tag is not known |
 
 The check asks `https://api.github.com/repos/<owner>/<repo>/releases/latest` (no drafts, no
 prereleases) with `curl` through `kit-run`. The cache `/tmp/kit-<id>-release.json` (tmpfs) keeps
