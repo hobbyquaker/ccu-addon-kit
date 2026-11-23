@@ -24,6 +24,9 @@ RUN mkdir -p /usr/local/addons /usr/local/tmp /usr/local/etc/config/rc.d /usr/lo
     && { [ -L /bin ] || ln -sf /usr/bin/tclsh /bin/tclsh; } \
     && printf 'PRODUCT=raspmatic_ova\nVERSION=3.89.8.20260719\nPLATFORM=x86_64\n' > /VERSION
 COPY e2e/lighttpd-ccu.conf /etc/lighttpd/lighttpd-ccu.conf
+# S50lighttpd only logs what update_script asks of it (reload, never a restart inside the request)
+COPY e2e/S50lighttpd /etc/init.d/S50lighttpd
+RUN chmod 755 /etc/init.d/S50lighttpd
 # busybox last: the shell and the tools of the rc.d script with busybox semantics
 RUN for a in sh ash awk sed tr grep cut du tail head wc logger date sleep kill ps; do ln -sf /usr/bin/busybox /usr/bin/$a; [ -L /bin ] || ln -sf /usr/bin/busybox /bin/$a; done
 CMD ["sh", "-c", "busybox syslogd -n -O /var/log/messages & lighttpd -D -f /etc/lighttpd/lighttpd-ccu.conf & wait"]

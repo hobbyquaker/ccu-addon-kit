@@ -12,7 +12,7 @@ fail() { echo "FAIL $*"; failed=1; }
 # busybox ash supports `local` (SC3043); the CCU scripts are busybox scripts
 SCRIPTS="classic/sh/kit-run classic/sh/rc.d-reference classic/sh/rc-helpers.sh classic/sh/update_script-reference
 example/kitdemo/addon_files/update_script example/kitdemo/addon_files/kitdemo/rc.d example/kitdemo/addon_files/kitdemo/bin/kitdemo
-example/kitdemo/build.sh test/sh/run.sh test/gate.sh"
+example/kitdemo/build.sh test/sh/run.sh test/gate.sh test/e2e/S50lighttpd"
 for f in $SCRIPTS; do
     if shellcheck -s sh -S warning -e SC3043 "$f"; then ok "shellcheck $f"; else fail "shellcheck $f"; fi
     if busybox sh -n "$f"; then ok "busybox sh -n $f"; else fail "busybox sh -n $f"; fi

@@ -1,0 +1,12 @@
+#!/bin/sh
+#
+#   A stand-in for OpenCCU's /etc/init.d/S50lighttpd in the end-to-end container (ccu-addon-kit,
+#   MIT): it only appends the action to /tmp/S50lighttpd.log, so the test can tell a reload from
+#   a restart. /tmp/S50lighttpd-no-reload makes `reload` fail like a firmware without one.
+#
+echo "$1" >> /tmp/S50lighttpd.log
+case "$1" in
+    reload) [ ! -f /tmp/S50lighttpd-no-reload ] ;;
+    start|stop|restart) exit 0 ;;
+    *) exit 1 ;;
+esac

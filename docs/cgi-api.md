@@ -113,8 +113,11 @@ $HTTP["url"] =~ "^/addons/red/" {
 (only what openccu-lite's fragment check allows). A Go addon renders the same text with
 `go/addonkit/fragment` (`Fragment{ID, Path, WWW, Port, WebSocket, ErrorfilePrefix}`); both are
 checked against the fixtures in `go/addonkit/fragment/testdata`. The reference `update_script` links it as
-`/usr/local/etc/config/lighttpd/<id>.conf` and restarts lighttpd on a running OpenCCU when the
-link is new (the CCU3 firmware installs during the shutdown, so its boot reads it); the reference
+`/usr/local/etc/config/lighttpd/<id>.conf` and reloads lighttpd on a running OpenCCU when the
+link is new (the CCU3 firmware installs during the shutdown, so its boot reads it). It reloads,
+never restarts: on OpenCCU the script runs inside the WebUI's `cp_software.cgi` request, which a
+restart of lighttpd cuts off (no answer, no reboot); where `reload` fails, it restarts detached and
+5 s later. The reference
 rc.d `uninstall` removes it. The addon's tree is linked as `/usr/local/etc/config/addons/www/<www>`
 (`WWW=` in both reference scripts), and `<id>.cfg`'s `CONFIG_URL` is `/addons/<www>/settings.cgi`:
 `vendor` refuses a tree whose `<id>.cfg` or `WWW=` disagrees with kit.json.

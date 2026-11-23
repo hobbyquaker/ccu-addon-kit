@@ -54,6 +54,11 @@ function installAddon() {
         && cd "$dir" && sha256sum -c update_script.sha256 >/dev/null && ./update_script HM-RASPBERRYMATIC >/tmp/update_script.log 2>&1; rc=$?; cd /; rm -rf "$dir"; exit $rc`, {ok: false}).code;
 }
 
+// what update_script asked of S50lighttpd since the last call (the stub's log, then emptied)
+function lighttpdActions() {
+    return sh('cat /tmp/S50lighttpd.log 2>/dev/null; : > /tmp/S50lighttpd.log', {ok: false}).out.trim().split('\n').join(' ');
+}
+
 describe('kitdemo end to end', {timeout: 600000}, () => {
     before(() => {
         execFileSync('sh', [join(KIT_ROOT, 'example/kitdemo/build.sh')], {
@@ -76,6 +81,7 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
         assert.match(sh(`${RC} info`).out, /^Name: Kit Demo$/m);
         assert.equal(sh(`cat ${ADDON}/etc/kitdemo.conf ${ADDON}/etc/greeting.txt >/dev/null && echo ok`).out.trim(), 'ok', 'the defaults were copied');
         assert.equal(sh(`test -x ${ADDON}/bin/kit-run && test -f ${ADDON}/lib/kit/addon.tcl && test -f ${ADDON}/www/frame/index.html && echo ok`).out.trim(), 'ok');
+        assert.equal(lighttpdActions(), '', 'no proxy rule: lighttpd left alone');
     });
 
     it('conforms to the service convention (check-rc C1-C12)', async () => {
@@ -149,12 +155,40 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
         assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
         assert.equal(http(`/addons/kitdemo/api/hello.cgi?sid=${encodeURIComponent(SID)}`).json.greeting, 'Grüß dich');
         assert.equal(sh(`${RC} status`, {ok: false}).code, 0);
+        assert.equal(lighttpdActions(), '');
+    });
+
+    // an addon with its own server: update_script runs inside the WebUI's cp_software.cgi request
+    // on OpenCCU, so a new proxy rule may only reload lighttpd, never restart it under the request
+    it('reloads lighttpd for a new proxy rule, never restarts it', () => {
+        sh(`echo '# a proxy rule' > ${ADDON}/etc/lighttpd.conf`);
+        assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+        assert.equal(sh('readlink /usr/local/etc/config/lighttpd/kitdemo.conf').out.trim(), `${ADDON}/etc/lighttpd.conf`);
+        assert.equal(lighttpdActions(), 'reload');
+        assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+        assert.equal(lighttpdActions(), '', 'the rule was there: lighttpd left alone');
+    });
+
+    it('restarts lighttpd only detached and delayed where reload fails', () => {
+        sh('rm -f /usr/local/etc/config/lighttpd/kitdemo.conf && touch /tmp/S50lighttpd-no-reload');
+        try {
+            assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(lighttpdActions(), 'reload', 'no restart before update_script has returned');
+            let actions = '';
+            for (let i = 0; i < 50 && actions === ''; i++) {
+                execFileSync('sleep', ['0.2']);
+                actions = lighttpdActions();
+            }
+            assert.equal(actions, 'restart');
+        } finally {
+            sh('rm -f /tmp/S50lighttpd-no-reload');
+        }
     });
 
     it('uninstalls without leftovers', () => {
         sh(`${RC} uninstall >/dev/null`);
         sh(`rm -f ${RC}`);
-        const left = sh(`for p in ${ADDON} ${RC} /usr/local/etc/config/addons/www/kitdemo /var/log/kitdemo.log /tmp/kit-kitdemo-release.json; do [ -e "$p" ] || [ -L "$p" ] && echo "$p"; done; grep -c kitdemo /usr/local/etc/config/hm_addons.cfg; pidof kitdemo; true`, {ok: false}).out;
+        const left = sh(`for p in ${ADDON} ${RC} /usr/local/etc/config/addons/www/kitdemo /usr/local/etc/config/lighttpd/kitdemo.conf /var/log/kitdemo.log /tmp/kit-kitdemo-release.json; do [ -e "$p" ] || [ -L "$p" ] && echo "$p"; done; grep -c kitdemo /usr/local/etc/config/hm_addons.cfg; pidof kitdemo; true`, {ok: false}).out;
         assert.equal(left.trim(), '0');
         assert.equal(sh('ps | grep -v grep | grep -c "bin/kitdemo"', {ok: false}).out.trim(), '0');
     });
