@@ -54,6 +54,26 @@ function installAddon() {
         && cd "$dir" && sha256sum -c update_script.sha256 >/dev/null && ./update_script HM-RASPBERRYMATIC >/tmp/update_script.log 2>&1; rc=$?; cd /; rm -rf "$dir"; exit $rc`, {ok: false}).code;
 }
 
+// the CCU3 firmware's install_addon (the handbook, chapter 02): the package unpacked into a temp dir
+// below /usr/local/tmp, a copy of the root beside it (everything in /usr but local, /etc), /proc,
+// /sys, /dev and /usr/local bound in, update_script run in a chroot there; the temp dir stays.
+// The container needs CAP_SYS_ADMIN for the binds (see before()).
+function installAddonCCU3() {
+    return sh(`dir=$(mktemp -d -p /usr/local/tmp) && tar -C "$dir" --no-same-owner --no-same-permissions -xzf /dist/kitdemo-${VERSION}.tar.gz \
+        && mkdir -p "$dir/usr" "$dir/proc" "$dir/sys" "$dir/dev" "$dir/usr/local" && cp -a /etc "$dir/" \
+        && for d in /usr/*; do [ "$d" = /usr/local ] || cp -a "$d" "$dir/usr/"; done \
+        && for l in bin sbin lib lib64; do [ -L /$l ] && cp -a /$l "$dir/"; done; \
+        for m in proc sys dev usr/local; do mount -o bind /$m "$dir/$m" || exit 99; done; \
+        chroot "$dir" /bin/sh -c 'cd / && ./update_script HM-RASPBERRYMATIC' >/tmp/update_script.log 2>&1; rc=$?; \
+        for m in usr/local dev sys proc; do umount "$dir/$m" 2>>/tmp/update_script.log || umount -l "$dir/$m"; done; \
+        grep -q " $dir/" /proc/mounts || rm -rf "$dir"; exit $rc`, {ok: false}).code;
+}
+
+// the root directory of the running daemon (from its pid file), or '' when it does not run
+function daemonRoot() {
+    return sh(`pid=$(cat ${ADDON}/var/kitdemo.pid 2>/dev/null) && [ -n "$pid" ] && [ -d /proc/$pid ] && readlink /proc/$pid/root`, {ok: false}).out.trim();
+}
+
 // what update_script asked of S50lighttpd since the last call (the stub's log, then emptied)
 function lighttpdActions() {
     return sh('cat /tmp/S50lighttpd.log 2>/dev/null; : > /tmp/S50lighttpd.log', {ok: false}).out.trim().split('\n').join(' ');
@@ -65,7 +85,7 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
             env: {...process.env, VERSION, KIT: `node ${join(KIT_ROOT, 'cli/index.mjs')}`}, stdio: ['ignore', 'ignore', 'inherit'],
         });
         assert.ok(readdirSync(join(KIT_ROOT, 'example/kitdemo/dist')).includes(`kitdemo-${VERSION}.tar.gz`));
-        execFileSync('docker', ['run', '-d', '--init', '--name', NAME, '-v', `${join(KIT_ROOT, 'example/kitdemo/dist')}:/dist:ro`, IMAGE], {stdio: 'ignore'});
+        execFileSync('docker', ['run', '-d', '--init', '--cap-add', 'SYS_ADMIN', '--security-opt', 'apparmor=unconfined', '--name', NAME, '-v', `${join(KIT_ROOT, 'example/kitdemo/dist')}:/dist:ro`, IMAGE], {stdio: 'ignore'});
         for (let i = 0; i < 50 && sh('test -f /var/log/messages && curl -s -o /dev/null http://127.0.0.1/', {ok: false}).code !== 0; i++) {
             execFileSync('sleep', ['0.2']);
         }
@@ -183,6 +203,73 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
         } finally {
             sh('rm -f /tmp/S50lighttpd-no-reload');
         }
+    });
+
+    // the rule: an addon that ran before an update runs after it, one that was stopped stays stopped
+    it('leaves a stopped service stopped after an update', () => {
+        sh(`${RC} stop >/dev/null`);
+        assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+        assert.equal(sh(`${RC} status`, {ok: false}).code, 3, 'not started');
+        sh(`${RC} start >/dev/null`);
+    });
+
+    // OpenCCU's home page lists addon updates from its daily check: after an install the kit's
+    // release cache goes and the check runs again, detached, once the script has returned
+    it('clears the release cache and runs OpenCCU\'s update check after the install', () => {
+        sh('printf \'#!/bin/sh\\necho "run $(date +%%s)" >> /tmp/checkAddonUpdates.log\\n\' > /usr/bin/checkAddonUpdates.sh && chmod 755 /usr/bin/checkAddonUpdates.sh && rm -f /tmp/checkAddonUpdates.log');
+        sh('echo \'{"tag_name":"v0.0.1"}\' > /tmp/kit-kitdemo-release.json');
+        const t0 = Date.now();
+        assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+        assert.ok(Date.now() - t0 < 9000, 'the installer does not wait for the check');
+        assert.equal(sh('test -e /tmp/kit-kitdemo-release.json', {ok: false}).code, 1, 'the cache is gone');
+        assert.equal(sh('test -e /tmp/checkAddonUpdates.log', {ok: false}).code, 1, 'not yet: the request is still being answered');
+        let log = '';
+        for (let i = 0; i < 80 && log === ''; i++) {
+            execFileSync('sleep', ['0.25']);
+            log = sh('cat /tmp/checkAddonUpdates.log 2>/dev/null', {ok: false}).out.trim();
+        }
+        assert.match(log, /^run \d+$/);
+        sh('touch /etc/config/NoAddonUpdateCheck && rm -f /tmp/checkAddonUpdates.log');
+        try {
+            assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            execFileSync('sleep', ['12']);
+            assert.equal(sh('test -e /tmp/checkAddonUpdates.log', {ok: false}).code, 1, 'switched off by NoAddonUpdateCheck');
+        } finally {
+            sh('rm -f /etc/config/NoAddonUpdateCheck');
+        }
+    });
+
+    describe('on the CCU3 firmware (S00InstallAddon)', () => {
+        before(() => { sh('touch /etc/init.d/S00InstallAddon'); });
+        after(() => { sh('rm -f /etc/init.d/S00InstallAddon'); });
+
+        // a live install there: a self-updater or a piVCCU without the reboot after the upload
+        it('starts a running service again after a live update, in the real root', () => {
+            assert.equal(sh(`${RC} status`, {ok: false}).code, 0, 'running before');
+            assert.equal(installAddon(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(sh(`${RC} status`, {ok: false}).code, 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(daemonRoot(), '/');
+        });
+
+        it('starts it from the installer\'s chroot in the real root, not in the chroot', () => {
+            assert.equal(installAddonCCU3(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(sh(`${RC} status`, {ok: false}).code, 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(daemonRoot(), '/');
+        });
+
+        // the firmware's own install during the shutdown: S98StartAddons has stopped the addons
+        it('starts nothing from the chroot when the service was stopped (the shutdown install)', () => {
+            sh(`${RC} stop >/dev/null`);
+            assert.equal(installAddonCCU3(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(sh(`${RC} status`, {ok: false}).code, 3, 'the boot starts it');
+            assert.equal(sh('ps | grep -v grep | grep -c "bin/kitdemo"', {ok: false}).out.trim(), '0');
+        });
+
+        it('starts no update check there, live or from the chroot', () => {
+            execFileSync('sleep', ['12']);
+            assert.equal(sh('test -e /tmp/checkAddonUpdates.log', {ok: false}).code, 1, sh('cat /tmp/checkAddonUpdates.log', {ok: false}).out);
+            sh('rm -f /usr/bin/checkAddonUpdates.sh');
+        });
     });
 
     it('uninstalls without leftovers', () => {
