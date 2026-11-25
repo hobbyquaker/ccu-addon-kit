@@ -15,7 +15,7 @@ const good = `{
   "requires": {"architectures": ["aarch64", "x86_64"]},
   "ui": {"icon": "battery/www/icon.svg", "session_header": true},
   "runtime": {"daemon": true, "needs": [], "api_scopes": ["rpc:read", "meta:read"], "groups": ["usbstorage"], "paths": ["/media"],
-              "note": "records battery voltages"}
+              "note": "records battery voltages", "technical": {"de": "liest Geräte", "en": "reads devices"}}
 }`
 
 func TestParseGood(t *testing.T) {
@@ -23,7 +23,8 @@ func TestParseGood(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if m.ID != "battery" || m.Description["de"] != "Batterien" || m.Runtime.Note["en"] != "records battery voltages" {
+	if m.ID != "battery" || m.Description["de"] != "Batterien" || m.Runtime.Note["en"] != "records battery voltages" ||
+		m.Runtime.Technical["en"] != "reads devices" {
 		t.Fatalf("%+v", m)
 	}
 	if m.Changelog != "https://github.com/hobbyquaker/ccu-addon-battery/blob/main/CHANGELOG.md" {
@@ -298,5 +299,36 @@ func TestRuntimeBinAndTimers(t *testing.T) {
 		if _, err := Parse([]byte(src)); err == nil {
 			t.Errorf("%s: accepted %s", name, src)
 		}
+	}
+}
+
+func TestSummaryAndTechnical(t *testing.T) {
+	m, err := Parse([]byte(`{"format": 1, "id": "x", "name": "X",
+  "summary": {"de": "Kurz", "en": "Short"},
+  "runtime": {"needs": [], "technical": "reads nothing"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Summary["de"] != "Kurz" || m.Runtime.Technical["en"] != "reads nothing" || len(m.Warnings()) != 0 {
+		t.Fatalf("%+v %v", m, m.Warnings())
+	}
+	// technical, like note, is no declaration
+	if !m.Undeclared() {
+		t.Error("a block of needs and technical is undeclared")
+	}
+	// too long or more than one line: accepted, with a warning (the system cuts it, never refuses)
+	long := strings.Repeat("ä", SummaryMax+1)
+	m, err = Parse([]byte(`{"format": 1, "id": "x", "name": "X", "summary": {"de": "` + long + `", "en": "two\nlines"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := m.Warnings()
+	if len(w) != 2 || !strings.Contains(w[0], "summary.de has 81 characters") || !strings.Contains(w[1], "summary.en has more than one line") {
+		t.Fatalf("warnings: %q", w)
+	}
+	// exactly at the limit: no warning
+	m, _ = Parse([]byte(`{"format": 1, "id": "x", "name": "X", "summary": "` + strings.Repeat("a", SummaryMax) + `"}`))
+	if len(m.Warnings()) != 0 {
+		t.Fatalf("warnings at the limit: %q", m.Warnings())
 	}
 }

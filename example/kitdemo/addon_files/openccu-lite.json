@@ -6,6 +6,10 @@
     "de": "Das Beispiel-Addon von ccu-addon-kit: ein kleiner Dienst mit der gemeinsamen Einstellungsseite.",
     "en": "The ccu-addon-kit example addon: a small service with the shared settings page."
   },
+  "summary": {
+    "de": "Beispiel-Addon: ein kleiner Dienst mit Einstellungsseite",
+    "en": "Example addon: a small service with a settings page"
+  },
   "homepage": "https://github.com/hobbyquaker/ccu-addon-kit",
   "licence": "MIT",
   "ui": {
@@ -15,6 +19,10 @@
   "runtime": {
     "daemon": true,
     "needs": [],
-    "ports": []
+    "ports": [],
+    "technical": {
+      "de": "Ein kleiner sh-Dienst, der nur einen Herzschlag protokolliert; öffnet keinen Port und braucht kein Zusatzrecht.",
+      "en": "A small sh service that only logs a heartbeat; opens no port and needs no privilege."
+    }
   }
 }

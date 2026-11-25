@@ -12,8 +12,10 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Text is a translated text: {"de": …, "en": …} or one string.
@@ -60,7 +62,11 @@ type Manifest struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description Text   `json:"description,omitempty"`
-	Homepage    string `json:"homepage,omitempty"`
+	// Summary is the catalogue card's one line (occulited task 188, openccu-lite 2.0.0-rc.5): at most
+	// SummaryMax characters per language; the system cuts a longer one with an ellipsis and never
+	// refuses it, so Warnings says so and Validate does not.
+	Summary  Text   `json:"summary,omitempty"`
+	Homepage string `json:"homepage,omitempty"`
 	// Changelog is an http(s) URL of the release notes (a CHANGELOG.md): the Addons page links it
 	// beside an offered update instead of the release's page.
 	Changelog string    `json:"changelog,omitempty"`
@@ -232,6 +238,9 @@ type Runtime struct {
 	Daemon       bool                `json:"daemon,omitempty"`
 	APIScopes    []string            `json:"api_scopes,omitempty"`
 	Note         Text                `json:"note,omitempty"`
+	// Technical: what the addon needs, opens and contacts (D-90), shown under Details and in the
+	// install question; Note is the users' text beside it (occulited task 188).
+	Technical Text `json:"technical,omitempty"`
 	// WebIngress: the addon brings connections from outside into the web server (a VPN or tunnel
 	// addon that ends the tunnel in its own process). The system gives it lighttpd's PROXY-protocol
 	// Unix socket /run/lighttpd-addons/<id>/proxy.sock (www-data:addon-<id>, 0750) and accepts the
@@ -508,8 +517,32 @@ func checkDataDir(d, id string) error {
 	return nil
 }
 
+// SummaryMax is the system's limit for a summary, in characters per language.
+const SummaryMax = 80
+
+// Warnings lists what the system accepts but changes: a summary longer than SummaryMax (cut with
+// an ellipsis) or of more than one line (made one line).
+func (m *Manifest) Warnings() []string {
+	var w []string
+	langs := make([]string, 0, len(m.Summary))
+	for lang := range m.Summary {
+		langs = append(langs, lang)
+	}
+	sort.Strings(langs)
+	for _, lang := range langs {
+		s := m.Summary[lang]
+		if strings.ContainsAny(s, "\r\n") {
+			w = append(w, fmt.Sprintf("summary.%s has more than one line; the system makes it one", lang))
+		}
+		if n := utf8.RuneCountInString(strings.TrimSpace(s)); n > SummaryMax {
+			w = append(w, fmt.Sprintf("summary.%s has %d characters; the system cuts it at %d with an ellipsis", lang, n, SummaryMax))
+		}
+	}
+	return w
+}
+
 // Undeclared says whether the system would show the addon as "undeclared": no runtime block, or
-// one that says only the start order (needs, start, note). Any other key is a declaration.
+// one that says only the start order (needs, start, note, technical). Any other key is a declaration.
 func (m *Manifest) Undeclared() bool {
 	r := m.Runtime
 	if r == nil {
