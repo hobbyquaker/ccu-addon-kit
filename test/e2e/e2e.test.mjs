@@ -56,17 +56,26 @@ function installAddon() {
 
 // the CCU3 firmware's install_addon (the handbook, chapter 02): the package unpacked into a temp dir
 // below /usr/local/tmp, a copy of the root beside it (everything in /usr but local, /etc), /proc,
-// /sys, /dev and /usr/local bound in, update_script run in a chroot there; the temp dir stays.
-// The container needs CAP_SYS_ADMIN for the binds (see before()).
+// /sys, /dev and /usr/local bound in, update_script run in a chroot there, unmounted; the temp dir
+// stays, as the firmware leaves it. Run as a script named install_addon, as the firmware runs it
+// (update_script's cleanup waits for that process). The container needs CAP_SYS_ADMIN for the
+// binds (see before()). Returns the exit code and the temp dir.
+const INSTALL_ADDON_CCU3 = `#!/bin/sh
+dir=$(mktemp -d -p /usr/local/tmp) && tar -C "$dir" --no-same-owner --no-same-permissions -xzf /dist/kitdemo-${VERSION}.tar.gz \\
+    && mkdir -p "$dir/usr" "$dir/proc" "$dir/sys" "$dir/dev" "$dir/usr/local" && cp -a /etc "$dir/" \\
+    && for d in /usr/*; do [ "$d" = /usr/local ] || cp -a "$d" "$dir/usr/"; done \\
+    && for l in bin sbin lib lib64; do [ -L /$l ] && cp -a /$l "$dir/"; done
+echo "$dir" > /tmp/install_addon.dir
+for m in proc sys dev usr/local; do mount -o bind /$m "$dir/$m" || exit 99; done
+chroot "$dir" /bin/sh -c 'cd / && ./update_script HM-RASPBERRYMATIC' >/tmp/update_script.log 2>&1; rc=$?
+sleep 1
+for m in usr/local dev sys proc; do umount "$dir/$m" 2>>/tmp/update_script.log || umount -l "$dir/$m"; done
+exit $rc
+`;
 function installAddonCCU3() {
-    return sh(`dir=$(mktemp -d -p /usr/local/tmp) && tar -C "$dir" --no-same-owner --no-same-permissions -xzf /dist/kitdemo-${VERSION}.tar.gz \
-        && mkdir -p "$dir/usr" "$dir/proc" "$dir/sys" "$dir/dev" "$dir/usr/local" && cp -a /etc "$dir/" \
-        && for d in /usr/*; do [ "$d" = /usr/local ] || cp -a "$d" "$dir/usr/"; done \
-        && for l in bin sbin lib lib64; do [ -L /$l ] && cp -a /$l "$dir/"; done; \
-        for m in proc sys dev usr/local; do mount -o bind /$m "$dir/$m" || exit 99; done; \
-        chroot "$dir" /bin/sh -c 'cd / && ./update_script HM-RASPBERRYMATIC' >/tmp/update_script.log 2>&1; rc=$?; \
-        for m in usr/local dev sys proc; do umount "$dir/$m" 2>>/tmp/update_script.log || umount -l "$dir/$m"; done; \
-        grep -q " $dir/" /proc/mounts || rm -rf "$dir"; exit $rc`, {ok: false}).code;
+    sh(`mkdir -p /tmp/ia && cat > /tmp/ia/install_addon <<'EOF'\n${INSTALL_ADDON_CCU3}EOF\nchmod 755 /tmp/ia/install_addon`);
+    const code = sh('/tmp/ia/install_addon', {ok: false}).code;
+    return {code, dir: sh('cat /tmp/install_addon.dir').out.trim()};
 }
 
 // the root directory of the running daemon (from its pid file), or '' when it does not run
@@ -252,7 +261,7 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
         });
 
         it('starts it from the installer\'s chroot in the real root, not in the chroot', () => {
-            assert.equal(installAddonCCU3(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(installAddonCCU3().code, 0, sh('cat /tmp/update_script.log', {ok: false}).out);
             assert.equal(sh(`${RC} status`, {ok: false}).code, 0, sh('cat /tmp/update_script.log', {ok: false}).out);
             assert.equal(daemonRoot(), '/');
         });
@@ -260,9 +269,46 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
         // the firmware's own install during the shutdown: S98StartAddons has stopped the addons
         it('starts nothing from the chroot when the service was stopped (the shutdown install)', () => {
             sh(`${RC} stop >/dev/null`);
-            assert.equal(installAddonCCU3(), 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+            assert.equal(installAddonCCU3().code, 0, sh('cat /tmp/update_script.log', {ok: false}).out);
             assert.equal(sh(`${RC} status`, {ok: false}).code, 3, 'the boot starts it');
             assert.equal(sh('ps | grep -v grep | grep -c "bin/kitdemo"', {ok: false}).out.trim(), '0');
+        });
+
+        // the installer never removes its temp dir (a copy of the root): the backups carried them
+        it('removes the installer leftovers: earlier ones at once, its own once the installer has ended', () => {
+            sh('cd /usr/local/tmp && for d in tmp.old111 tmp.old222; do mkdir -p $d/etc && touch $d/update_script; done'
+                + ' && mkdir -p tmp.other1 && touch tmp.other1/keep');
+            try {
+                const {code, dir} = installAddonCCU3();
+                assert.equal(code, 0, sh('cat /tmp/update_script.log', {ok: false}).out);
+                const left = () => sh('cd /usr/local/tmp && ls -d tmp.* 2>/dev/null; true').out.split('\n').filter(Boolean).sort();
+                // the job on the real root: wait until it has ended (it polls the installer every 2 s)
+                const job = () => sh('for f in /proc/[0-9]*/cmdline; do tr "\\\\0" "\\\\n" < $f 2>/dev/null | grep -qx kit-tmpclean && echo $f; done | wc -l').out.trim();
+                for (let i = 0; i < 60 && job() !== '0'; i++) { execFileSync('sleep', ['0.25']); }
+                assert.equal(job(), '0', 'the cleanup job has ended');
+                assert.deepEqual(left(), ['tmp.other1'], `${dir} and the earlier installs' gone, the rest kept`);
+                assert.equal(sh(`test -x ${RC} && test -f ${ADDON}/versions && echo ok`).out.trim(), 'ok', 'the addon is installed');
+                assert.match(sh('cat /var/log/messages').out, /kitdemo: removed the installer leftover \/usr\/local\/tmp\/tmp\.old111/);
+            } finally {
+                sh('rm -rf /usr/local/tmp/tmp.other1', {ok: false});
+            }
+        });
+
+        // the job on the real root sees every mount: a directory with one below it (an install that
+        // has not unmounted yet) is never removed - rm -rf would go through the bind of /usr/local
+        it('never removes a directory with a mount below it, nor one without an update_script', () => {
+            sh('cd /usr/local/tmp && mkdir -p tmp.other1 && touch tmp.other1/keep'
+                + ' && mkdir -p tmp.mount1/usr/local && touch tmp.mount1/update_script && mount -o bind /usr/local /usr/local/tmp/tmp.mount1/usr/local');
+            try {
+                // the package's own cleanup, as the job runs it
+                sh(`mkdir -p /tmp/pkg && tar -C /tmp/pkg -xzf /dist/kitdemo-${VERSION}.tar.gz ./update_script`
+                    + ' && eval "$(sed -n "/^KIT_TMPCLEAN=\'/,/^\'\$/p" /tmp/pkg/update_script)" && [ -n "$KIT_TMPCLEAN" ]'
+                    + ' && cd / && sh -c "$KIT_TMPCLEAN" kit-tmpclean wait kitdemo');
+                assert.deepEqual(sh('cd /usr/local/tmp && ls -d tmp.* 2>/dev/null; true').out.split('\n').filter(Boolean).sort(), ['tmp.mount1', 'tmp.other1']);
+                assert.equal(sh(`test -x ${RC} && test -f /usr/local/tmp/tmp.mount1/update_script && test -f /usr/local/tmp/tmp.mount1/usr/local/addons/kitdemo/versions && echo ok`).out.trim(), 'ok', 'the user partition is intact');
+            } finally {
+                sh('umount /usr/local/tmp/tmp.mount1/usr/local; rm -rf /usr/local/tmp/tmp.mount1 /usr/local/tmp/tmp.other1 /tmp/pkg', {ok: false});
+            }
         });
 
         it('starts no update check there, live or from the chroot', () => {
