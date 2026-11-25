@@ -57,7 +57,8 @@ function installAddon() {
 // the CCU3 firmware's install_addon (the handbook, chapter 02): the package unpacked into a temp dir
 // below /usr/local/tmp, a copy of the root beside it (everything in /usr but local, /etc), /proc,
 // /sys, /dev and /usr/local bound in, update_script run in a chroot there, unmounted; the temp dir
-// stays, as the firmware leaves it. Run as a script named install_addon, as the firmware runs it
+// stays, as the firmware leaves it, and a mount that is busy stays as well (the firmware's umount
+// has no fallback). Run as a script named install_addon, as the firmware runs it
 // (update_script's cleanup waits for that process). The container needs CAP_SYS_ADMIN for the
 // binds (see before()). Returns the exit code and the temp dir.
 const INSTALL_ADDON_CCU3 = `#!/bin/sh
@@ -69,7 +70,7 @@ echo "$dir" > /tmp/install_addon.dir
 for m in proc sys dev usr/local; do mount -o bind /$m "$dir/$m" || exit 99; done
 chroot "$dir" /bin/sh -c 'cd / && ./update_script HM-RASPBERRYMATIC' >/tmp/update_script.log 2>&1; rc=$?
 sleep 1
-for m in usr/local dev sys proc; do umount "$dir/$m" 2>>/tmp/update_script.log || umount -l "$dir/$m"; done
+for m in usr/local dev sys proc; do umount "$dir/$m" 2>>/tmp/update_script.log; done
 exit $rc
 `;
 function installAddonCCU3() {
@@ -286,6 +287,7 @@ describe('kitdemo end to end', {timeout: 600000}, () => {
                 const job = () => sh('for f in /proc/[0-9]*/cmdline; do tr "\\\\0" "\\\\n" < $f 2>/dev/null | grep -qx kit-tmpclean && echo $f; done | wc -l').out.trim();
                 for (let i = 0; i < 60 && job() !== '0'; i++) { execFileSync('sleep', ['0.25']); }
                 assert.equal(job(), '0', 'the cleanup job has ended');
+                assert.equal(sh('grep -c " /usr/local/tmp/" /proc/mounts; true').out.trim(), '0', 'the installer could unmount everything');
                 assert.deepEqual(left(), ['tmp.other1'], `${dir} and the earlier installs' gone, the rest kept`);
                 assert.equal(sh(`test -x ${RC} && test -f ${ADDON}/versions && echo ok`).out.trim(), 'ok', 'the addon is installed');
                 assert.match(sh('cat /var/log/messages').out, /kitdemo: removed the installer leftover \/usr\/local\/tmp\/tmp\.old111/);

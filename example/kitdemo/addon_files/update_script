@@ -163,11 +163,13 @@ fi
 # --- ccu-addon-kit: this install's leftover (update_script-reference, keep identical) ---
 # The CCU3 firmware's installer leaves this script's directory behind (above): a job on the real
 # root (/proc/1/root, the chroot has /proc bound in) waits until install_addon has ended and
-# unmounted, then removes it by the same rules. During the shutdown install the reboot may end
-# the job first; the boot empties /usr/local/tmp there.
-if [ -f /etc/init.d/S00InstallAddon ] && [ -d /proc/1/root/usr/local/tmp ] && command -v chroot >/dev/null 2>&1; then
+# unmounted, then removes it by the same rules. Nothing of the job may stay in the chroot: its
+# output goes to the real root's /dev/null, as one opened through the chroot's /dev would keep
+# that bind mount busy, the installer's umount would fail and the directory would stay. During
+# the shutdown install the reboot may end the job first; the boot empties /usr/local/tmp there.
+if [ -f /etc/init.d/S00InstallAddon ] && [ -c /proc/1/root/dev/null ] && [ -d /proc/1/root/usr/local/tmp ] && command -v chroot >/dev/null 2>&1; then
     cd /
-    chroot /proc/1/root /bin/sh -c "$KIT_TMPCLEAN" kit-tmpclean wait $ADDON >/dev/null 2>&1 </dev/null &
+    chroot /proc/1/root /bin/sh -c "$KIT_TMPCLEAN" kit-tmpclean wait $ADDON >/proc/1/root/dev/null 2>&1 </proc/1/root/dev/null &
 fi
 # --- end ---
 
